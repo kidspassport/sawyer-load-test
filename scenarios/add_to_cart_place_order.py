@@ -2,7 +2,8 @@ from locust import SequentialTaskSet, task
 from utils.auth import extract_csrf_token
 
 class AddToCartPlaceOrderFlow(SequentialTaskSet):
-  # note:
+  # note: This was a POC, and does not reflect a realistic flow.  It correctly tests adding to cart and placing an order.
+  # The pre-checkout/checkout steps are partially reflected, but not complete.
   def on_start(self):
     self.user = self.user  # passed in from HttpUser
     self.csrf_token = self.csrf_token
