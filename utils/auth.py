@@ -12,8 +12,8 @@ def extract_csrf_token(html):
 
 def login(client, user):
     # GET login page to extract CSRF
-    resp = client.get("/auth/log-in")
-    csrf_token = extract_csrf_token(resp.text)
+    response = client.get("/auth/log-in")
+    csrf_token = extract_csrf_token(response.text)
     if not csrf_token:
         raise Exception("CSRF token not found on sign-in page")
 
@@ -27,8 +27,8 @@ def login(client, user):
 
     headers = { "Content-Type": "application/x-www-form-urlencoded" }
 
-    login_resp = client.post("/api/v1/marketplace/auth/log-in", data=payload, headers=headers)
-    if login_resp.status_code not in [200, 302]:
-        raise Exception(f"Login failed with status {login_resp.status_code}")
+    login_response = client.post("/api/v1/marketplace/auth/log-in", data=payload, headers=headers)
+    if login_response.status_code not in [200, 302]:
+        raise Exception(f"Login failed with status {login_response.status_code}")
 
     return csrf_token
