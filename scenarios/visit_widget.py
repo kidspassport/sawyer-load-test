@@ -10,7 +10,7 @@ class VisitWidgetScenario(SequentialTaskSet):
     # self.csrf_token = self.csrf_token
 
   @task
-  def add_to_cart_and_place_order(self):
+  def visit_widget(self):
     now = datetime.now()
 
     self.client.get( # Load widget calendar view
