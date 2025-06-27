@@ -73,5 +73,5 @@ def get_random_user():
 
 def get_unique_user():
     if user_queue.empty():
-        raise Exception("No more unique users available.")
+      raise Exception("No more unique users available.")
     return user_queue.get()

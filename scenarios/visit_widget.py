@@ -34,8 +34,8 @@ class VisitWidgetScenario(SequentialTaskSet):
       }
     )
 
-    self.client.get( # Load widget calendar view with age filters
-      f"/{os.getenv("slug")}/schedules/widget_calendar?slug=pretend-school&month=6&year=2025&age_ranges%5B%5D=11&age_ranges%5B%5D=14&age_ranges%5B%5D=20&age_ranges%5B%5D=21&age_ranges%5B%5D=23&adults_only=1&time_picker_max=84600&time_picker_min=21600",
+    self.client.get( # Load widget calendar view with age filters & time filters
+      f"/{os.getenv("slug")}/schedules/widget_calendar?slug={os.getenv("slug")}&month=6&year=2025&age_ranges%5B%5D=11&age_ranges%5B%5D=14&age_ranges%5B%5D=20&age_ranges%5B%5D=21&age_ranges%5B%5D=23&adults_only=1&time_picker_max=84600&time_picker_min=21600",
       headers={
         "Accept": "text/html"
       }
@@ -51,7 +51,7 @@ class VisitWidgetScenario(SequentialTaskSet):
     scheduled_activities = self.client.get( # Load data for widget list view
       f"/api/v1/widget/scheduled_activities?slug={os.getenv('slug')}&page=1",
       headers={
-          "Accept": "application/json"
+        "Accept": "application/json"
       }
     )
 
@@ -64,7 +64,7 @@ class VisitWidgetScenario(SequentialTaskSet):
     self.client.get( # Load widget list view w/ filters
       f"/{os.getenv('slug')}/schedules?slug={os.getenv('slug')}&age_ranges%5B%5D=15&age_ranges%5B%5D=16&age_ranges%5B%5D=22&age_ranges%5B%5D=23&time_picker_max=84600&time_picker_min=21600",
       headers={
-          "Accept": "application/json"
+        "Accept": "application/json"
       }
     )
 
