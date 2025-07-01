@@ -1,5 +1,6 @@
 from bs4 import BeautifulSoup
 
+
 def extract_csrf_token(html):
     soup = BeautifulSoup(html, 'html.parser')
     meta = soup.find("meta", attrs={"name": "csrf-token"})
@@ -9,6 +10,7 @@ def extract_csrf_token(html):
     if input_tag:
         return input_tag["value"]
     return None
+
 
 def login(client, user):
     # GET login page to extract CSRF
@@ -25,7 +27,7 @@ def login(client, user):
         "session[member][password]": user["password"]
     }
 
-    headers = { "Content-Type": "application/x-www-form-urlencoded" }
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
     login_resp = client.post("/api/v1/marketplace/auth/log-in", data=payload, headers=headers)
     if login_resp.status_code not in [200, 302]:
