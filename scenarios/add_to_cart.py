@@ -7,9 +7,6 @@ import random
 from bs4 import BeautifulSoup
 import re
 
-# import jwt
-# import time
-
 class AddToCartScenario(SequentialTaskSet):
   @task
   def add_to_cart(self):
@@ -45,12 +42,9 @@ class AddToCartScenario(SequentialTaskSet):
       json_props = html.unescape(raw_props)
       props_dict = json.loads(json_props)
 
-      # print(json.dumps(props_dict, indent=2))
-
       pricing_configs = props_dict.get("staticData", {}).get("pricing", {}).get("pricing_configurations", [])
       drop_in_config = next((cfg for cfg in pricing_configs if cfg.get("name") == "Drop In"), None)
       drop_in_config_id = drop_in_config["id"]
-      # print(f"drop_in_config_id {drop_in_config_id}")
 
       if drop_in_config_id:
         print("fetching calendar")
@@ -62,12 +56,11 @@ class AddToCartScenario(SequentialTaskSet):
             "X-Requested-With": "XMLHttpRequest"
           }
         )
-        print(calendar_response.text)
-        items = re.findall(r'data-item=\\"(\d+)\\"', calendar_response.text)
-        print(items)
 
+        items = re.findall(r'data-item=\\"(\d+)\\"', calendar_response.text)
         session_id = random.choice(items)
 
+        # TODO if session_id
         add_to_cart_response = self.client.post( # Add to cart
           "/cart/item/subtotal",
           data={
@@ -87,8 +80,6 @@ class AddToCartScenario(SequentialTaskSet):
             "Accept": "text/javascript"
           }
         )
-        print("---------------------------------------------------------------------------------------------")
-        print(add_to_cart_response.text)
 
 
     # TODO add a few interactions with the widget and pull from react APIs to simulate real traffic
@@ -119,7 +110,3 @@ class AddToCartScenario(SequentialTaskSet):
     #     "Accept": "text/javascript"
     #   }
     # )
-
-
-    print(user['email'])
-    print(csrf_token)
