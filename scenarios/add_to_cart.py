@@ -1,8 +1,14 @@
 from locust import SequentialTaskSet, task
 from utils.auth import extract_csrf_token, login
 import os
+import html
 import json
 import random
+from bs4 import BeautifulSoup
+import re
+
+# import jwt
+# import time
 
 class AddToCartScenario(SequentialTaskSet):
   @task
@@ -29,27 +35,90 @@ class AddToCartScenario(SequentialTaskSet):
     )
     csrf_token = extract_csrf_token(pdp_response.text)
 
+    soup = BeautifulSoup(pdp_response.text, "html.parser")
+    jwt_meta = soup.find("meta", attrs={"name": "api-jwt"})
+    react_div = soup.find("div", {"data-react-class": "marketplace/product_detail/app"})
+
+    if jwt_meta and jwt_meta.has_attr("content") and react_div and react_div.has_attr("data-react-props"):
+      jwt = jwt_meta["content"]
+      raw_props = react_div["data-react-props"]
+      json_props = html.unescape(raw_props)
+      props_dict = json.loads(json_props)
+
+      # print(json.dumps(props_dict, indent=2))
+
+      pricing_configs = props_dict.get("staticData", {}).get("pricing", {}).get("pricing_configurations", [])
+      drop_in_config = next((cfg for cfg in pricing_configs if cfg.get("name") == "Drop In"), None)
+      drop_in_config_id = drop_in_config["id"]
+      # print(f"drop_in_config_id {drop_in_config_id}")
+
+      if drop_in_config_id:
+        print("fetching calendar")
+        calendar_response = self.client.get(
+          f"/{os.getenv('slug')}/schedules/activity-set/{asg_id}/drop-in/{drop_in_config_id}/?source=semesters",
+          headers={
+            "Authorization": f"Bearer {jwt}",
+            "Accept": "text/javascript, application/javascript, application/ecmascript, application/x-ecmascript",
+            "X-Requested-With": "XMLHttpRequest"
+          }
+        )
+        print(calendar_response.text)
+        items = re.findall(r'data-item=\\"(\d+)\\"', calendar_response.text)
+        print(items)
+
+        session_id = random.choice(items)
+
+        add_to_cart_response = self.client.post( # Add to cart
+          "/cart/item/subtotal",
+          data={
+            "authenticity_token": csrf_token,
+            "item_type": "provider_semester",
+            "activity_session_group_id": asg_id,
+            "semester_id": session_id,
+            "view": "",
+            "add_to_cart_source": "widget",
+            "participants[]": f"children_{user['child_id']}",
+            "payment_plan_v2_enabled": "true",
+            "button": "add-to-cart"
+          },
+          headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "X-Requested-With": "XMLHttpRequest",
+            "Accept": "text/javascript"
+          }
+        )
+        print("---------------------------------------------------------------------------------------------")
+        print(add_to_cart_response.text)
+
+
     # TODO add a few interactions with the widget and pull from react APIs to simulate real traffic
+
+    # First, get pricing config ids from pdp_response
+    # Then,  use /:slug/schedules/activity-set/:asg_id/drop-in/:pc_id/?source=semesters to get calendar
     # We need to simulate loading the drop-in calendar to get a list of valid session_ids
-    add_to_cart_response = self.client.post( # Add to cart
-      "/cart/item/subtotal",
-      data={
-        "authenticity_token": csrf_token,
-        "item_type": "provider_semester",
-        "activity_session_group_id": asg_id,
-        "semester_id": session_id,
-        "view": "",
-        "add_to_cart_source": "widget",
-        "participants[]": f"children_{user['child_id']}",
-        "payment_plan_v2_enabled": "true",
-        "button": "add-to-cart"
-      },
-      headers={
-        "Content-Type": "application/x-www-form-urlencoded",
-        "X-Requested-With": "XMLHttpRequest",
-        "Accept": "text/javascript"
-      }
-    )
+    #   - pull 'data-items' for calendar response
+    # Randomly add sessions to cart
+
+
+    # add_to_cart_response = self.client.post( # Add to cart
+    #   "/cart/item/subtotal",
+    #   data={
+    #     "authenticity_token": csrf_token,
+    #     "item_type": "provider_semester",
+    #     "activity_session_group_id": asg_id,
+    #     "semester_id": session_id,
+    #     "view": "",
+    #     "add_to_cart_source": "widget",
+    #     "participants[]": f"children_{user['child_id']}",
+    #     "payment_plan_v2_enabled": "true",
+    #     "button": "add-to-cart"
+    #   },
+    #   headers={
+    #     "Content-Type": "application/x-www-form-urlencoded",
+    #     "X-Requested-With": "XMLHttpRequest",
+    #     "Accept": "text/javascript"
+    #   }
+    # )
 
 
     print(user['email'])
