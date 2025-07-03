@@ -5,7 +5,9 @@ import html
 import json
 import random
 from bs4 import BeautifulSoup
+from urllib.parse import urlparse, parse_qs
 import re
+from pprint import pprint
 
 class AddToCartScenario(SequentialTaskSet):
   @task
@@ -43,35 +45,46 @@ class AddToCartScenario(SequentialTaskSet):
       props_dict = json.loads(json_props)
 
       pricing_configs = props_dict.get("staticData", {}).get("pricing", {}).get("pricing_configurations", [])
-      drop_in_config = next((cfg for cfg in pricing_configs if cfg.get("name") == "Drop In"), None)
-      drop_in_config_id = drop_in_config["id"]
+      drop_in_config = next(
+        (cfg for cfg in pricing_configs if "drop in" in cfg.get("name", "").lower()),
+        None
+      )
+
+      if drop_in_config:
+        drop_in_config_id = drop_in_config["id"]
+      else:
+        raise Exception("Drop In pricing configuration not found in PDP response")
+
 
       if drop_in_config_id:
-        print("fetching calendar")
-        calendar_response = self.client.get(
-          f"/{os.getenv('slug')}/schedules/activity-set/{asg_id}/drop-in/{drop_in_config_id}/?source=semesters",
+        pricing_response = self.client.get(
+          f"/{os.getenv('slug')}/schedules/activity-set/{asg_id}/free-drop-in/{drop_in_config_id}/?source=semesters",
           headers={
             "Authorization": f"Bearer {jwt}",
             "Accept": "text/javascript, application/javascript, application/ecmascript, application/x-ecmascript",
             "X-Requested-With": "XMLHttpRequest"
           }
         )
-
-        items = re.findall(r'data-item=\\"(\d+)\\"', calendar_response.text)
-        session_id = random.choice(items)
+        # print(pricing_response.text)
+        session_ids = re.findall(r'data-item=\\"(\d+)\\"', pricing_response.text)
+        child_ids = re.findall(r'children_(\d{4,8})', pricing_response.text)
+        session_id = random.choice(session_ids)
+        child_id = random.choice(child_ids)
 
         # TODO if session_id
         add_to_cart_response = self.client.post( # Add to cart
           "/cart/item/subtotal",
           data={
             "authenticity_token": csrf_token,
-            "item_type": "provider_semester",
+            "item_type": "provider_free_dropin",
             "activity_session_group_id": asg_id,
-            "semester_id": session_id,
+            # "semester_id": os.getenv('semester_id'), #TODO
+            "semester_id": 508485, #TODO
+            "session_ids[]": session_id,
             "view": "",
             "add_to_cart_source": "widget",
-            "participants[]": f"children_{user['child_id']}",
-            "payment_plan_v2_enabled": "true",
+            "participants[]": f"children_{child_id}",
+            # "payment_plan_v2_enabled": "true",
             "button": "add-to-cart"
           },
           headers={
@@ -81,32 +94,72 @@ class AddToCartScenario(SequentialTaskSet):
           }
         )
 
+        self.client.get(
+          f"/{os.getenv('slug')}/schedules/precheckout/steps",
+          headers={
+            "Accept": "text/html"
+          }
+        )
 
-    # TODO add a few interactions with the widget and pull from react APIs to simulate real traffic
+        self.client.get( # Go past the precheckout form
+          "/pretend-school/schedules/precheckout/steps/next",
+          headers={
+            "Accept": "text/html"
+          }
+        )
 
-    # First, get pricing config ids from pdp_response
-    # Then,  use /:slug/schedules/activity-set/:asg_id/drop-in/:pc_id/?source=semesters to get calendar
-    # We need to simulate loading the drop-in calendar to get a list of valid session_ids
-    #   - pull 'data-items' for calendar response
-    # Randomly add sessions to cart
+        checkout_response = self.client.get(
+          "/pretend-school/schedules/checkout",
+          headers={
+            "Accept": "text/html"
+          }
+        )
+
+        soup = BeautifulSoup(checkout_response.text, 'html.parser')
 
 
-    # add_to_cart_response = self.client.post( # Add to cart
-    #   "/cart/item/subtotal",
-    #   data={
-    #     "authenticity_token": csrf_token,
-    #     "item_type": "provider_semester",
-    #     "activity_session_group_id": asg_id,
-    #     "semester_id": session_id,
-    #     "view": "",
-    #     "add_to_cart_source": "widget",
-    #     "participants[]": f"children_{user['child_id']}",
-    #     "payment_plan_v2_enabled": "true",
-    #     "button": "add-to-cart"
-    #   },
-    #   headers={
-    #     "Content-Type": "application/x-www-form-urlencoded",
-    #     "X-Requested-With": "XMLHttpRequest",
-    #     "Accept": "text/javascript"
-    #   }
-    # )
+        # Refresh the CSRF token from a meta tag or hidden input
+        meta = soup.find("meta", attrs={"name": "csrf-token"})
+        if meta:
+          self.csrf_token = meta["content"]
+        else:
+          input_tag = soup.find("input", attrs={"name": "authenticity_token"})
+          if input_tag:
+            self.csrf_token = input_tag["value"]
+
+        if not self.csrf_token:
+          raise Exception("CSRF token not found on checkout page")
+
+        link = soup.find('a', href=lambda href: href and 'referer_id=' in href)
+        if link:
+          url = link['href']
+          parsed_url = urlparse(url)
+          query_params = parse_qs(parsed_url.query)
+          provider_id = query_params.get('referer_id', [None])[0]
+
+        if not provider_id:
+          raise Exception("Could not find provider id on page")
+
+        # place the order
+        place_order_response = self.client.post(
+          f"/{os.getenv('slug')}/schedules/checkout/place_order",
+          data={
+            "authenticity_token": self.csrf_token,
+            "view": "",
+            "booking_fee_id": os.getenv('booking_fee_id'), # 😭😭😭
+            f"provider_form_responses[{provider_id}][id]": "",
+            f"provider_form_responses[{provider_id}][response]": "true",
+            "provider_fee_ids": "",
+            "one_off_payment_method_type": "",
+            "button": "place-order",
+            "slug": f"{os.getenv('slug')}"
+          },
+          headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "X-Requested-With": "XMLHttpRequest",
+            "Accept": "text/javascript"
+          }
+        )
+
+        print(f"{user["email"]} placed an order")
+
