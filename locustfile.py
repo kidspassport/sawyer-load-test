@@ -18,5 +18,7 @@ class RailsUser(HttpUser):
         self.tasks = [VisitWidgetScenario]
       elif os.getenv("scenario") == "add_to_cart":
         self.tasks = [AddToCartScenario]
+      elif os.getenv("scenario") == "rush":
+        self.tasks = [VisitWidgetScenario, AddToCartScenario]
       else:
         self.tasks = [view_explore, VisitWidgetScenario, AddToCartScenario]

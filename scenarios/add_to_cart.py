@@ -49,12 +49,6 @@ class AddToCartScenario(SequentialTaskSet):
         """Find the first pricing config with a name containing 'drop in'."""
         return next((cfg for cfg in pricing_configs if "drop in" in cfg.get("name", "").lower()), None)
 
-    def _extract_ids_from_js_html(self, text, session_pattern, child_pattern):
-        """Extract session and child IDs from JS-injected HTML using regex."""
-        session_ids = re.findall(session_pattern, text)
-        child_ids = re.findall(child_pattern, text)
-        return session_ids, child_ids
-
     def _get_provider_id(self, soup):
         """Extract provider_id from a link in the checkout page."""
         link = soup.find('a', href=lambda href: href and 'referer_id=' in href)
@@ -103,14 +97,14 @@ class AddToCartScenario(SequentialTaskSet):
                 "X-Requested-With": "XMLHttpRequest"
             }
         )
-        session_ids, child_ids = self._extract_ids_from_js_html(
-            pricing_response.text,
-            r'data-item=\\"(\\d+)\\"',
-            r'children_(\\d{4,8})'
-        )
+
+        session_ids = re.findall(r'data-item=\\"(\d+)\\"', pricing_response.text)
+        child_ids = re.findall(r'children_(\d{4,8})', pricing_response.text)
+
         if not session_ids or not child_ids:
             print("No session or child IDs found.")
             return
+
         session_id = random.choice(session_ids)
         child_id = random.choice(child_ids)
 
