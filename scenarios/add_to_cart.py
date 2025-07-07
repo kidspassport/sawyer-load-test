@@ -68,6 +68,10 @@ class AddToCartScenario(SequentialTaskSet):
         # print(pricing_response.text)
         session_ids = re.findall(r'data-item=\\"(\d+)\\"', pricing_response.text)
         child_ids = re.findall(r'children_(\d{4,8})', pricing_response.text)
+
+        if not session_ids or not child_ids:
+          return
+
         session_id = random.choice(session_ids)
         child_id = random.choice(child_ids)
 
