@@ -23,45 +23,11 @@ FORM_HEADER = "application/x-www-form-urlencoded"
 class AddToCartScenario(SequentialTaskSet):
     """Scenario for simulating add-to-cart and checkout flow in Locust load test."""
 
-    def _get_activity_ids(self):
-        """Fetch all activity session group IDs from the widget API."""
-        response = self.client.get(
-            f"/api/v1/widget/scheduled_activities?slug={os.getenv('slug')}&page=1",
-            headers={"Accept": API_ACCEPT_HEADER}
-        )
-        data = json.loads(response.text)
-        return [activity["id"] for activity in data.get("data", {}).get("results", [])]
-
-    def _get_jwt_and_props(self, pdp_html):
-        """Extract JWT token and React props from PDP HTML."""
-        soup = BeautifulSoup(pdp_html, "html.parser")
-        jwt_meta = soup.find("meta", attrs={"name": "api-jwt"})
-        react_div = soup.find("div", {"data-react-class": "marketplace/product_detail/app"})
-        jwt = jwt_meta["content"] if jwt_meta and jwt_meta.has_attr("content") else None
-        props_dict = None
-        if react_div and react_div.has_attr("data-react-props"):
-            raw_props = react_div["data-react-props"]
-            json_props = html.unescape(raw_props)
-            props_dict = json.loads(json_props)
-        return jwt, props_dict
-
-    def _find_drop_in_config(self, pricing_configs):
-        """Find the first pricing config with a name containing 'drop in'."""
-        return next((cfg for cfg in pricing_configs if "drop in" in cfg.get("name", "").lower()), None)
-
-    def _get_provider_id(self, soup):
-        """Extract provider_id from a link in the checkout page."""
-        link = soup.find('a', href=lambda href: href and 'referer_id=' in href)
-        if link:
-            url = link['href']
-            parsed_url = urlparse(url)
-            query_params = parse_qs(parsed_url.query)
-            return query_params.get('referer_id', [None])[0]
-        return None
+    def on_start(self):
+        self.slug = self.user.environment.parsed_options.slug
 
     @task
     def add_to_cart(self):
-        """Main task: simulate add-to-cart and checkout flow."""
         user = self.user.user
         csrf_token = login(self.client, user)
 
@@ -73,7 +39,7 @@ class AddToCartScenario(SequentialTaskSet):
         asg_id = random.choice(activity_ids)
 
         # Visit PDP for activity
-        pdp_response = self.client.get(f"/{os.getenv('slug')}/schedules/activity-set/{asg_id}?source=semesters")
+        pdp_response = self.client.get(f"/{self.slug}/schedules/activity-set/{asg_id}?source=semesters")
         csrf_token = extract_csrf_token(pdp_response.text)
         jwt, props_dict = self._get_jwt_and_props(pdp_response.text)
 
@@ -90,7 +56,7 @@ class AddToCartScenario(SequentialTaskSet):
 
         # Get session and child IDs from JS-injected HTML
         pricing_response = self.client.get(
-            f"/{os.getenv('slug')}/schedules/activity-set/{asg_id}/free-drop-in/{drop_in_config_id}/?source=semesters",
+            f"/{self.slug}/schedules/activity-set/{asg_id}/free-drop-in/{drop_in_config_id}/?source=semesters",
             headers={
                 "Authorization": f"Bearer {jwt}",
                 "Accept": JS_ACCEPT_HEADER,
@@ -131,7 +97,7 @@ class AddToCartScenario(SequentialTaskSet):
 
         # Precheckout steps
         self.client.get(
-            f"/{os.getenv('slug')}/schedules/precheckout/steps",
+            f"/{self.slug}/schedules/precheckout/steps",
             headers={"Accept": HTML_ACCEPT_HEADER}
         )
         self.client.get(
@@ -165,7 +131,7 @@ class AddToCartScenario(SequentialTaskSet):
 
         # Place the order
         place_order_response = self.client.post(
-            f"/{os.getenv('slug')}/schedules/checkout/place_order",
+            f"/{self.slug}/schedules/checkout/place_order",
             data={
                 "authenticity_token": self.csrf_token,
                 "view": "",
@@ -175,7 +141,7 @@ class AddToCartScenario(SequentialTaskSet):
                 "provider_fee_ids": "",
                 "one_off_payment_method_type": "",
                 "button": "place-order",
-                "slug": f"{os.getenv('slug')}"
+                "slug": f"{self.slug}"
             },
             headers={
                 "Content-Type": FORM_HEADER,
@@ -184,4 +150,36 @@ class AddToCartScenario(SequentialTaskSet):
             }
         )
         print(f"{user['email']} placed an order")
+
+    def _get_activity_ids(self):
+        response = self.client.get(
+            f"/api/v1/widget/scheduled_activities?slug={self.slug}&page=1",
+            headers={"Accept": API_ACCEPT_HEADER}
+        )
+        data = json.loads(response.text)
+        return [activity["id"] for activity in data.get("data", {}).get("results", [])]
+
+    def _get_jwt_and_props(self, pdp_html):
+        soup = BeautifulSoup(pdp_html, "html.parser")
+        jwt_meta = soup.find("meta", attrs={"name": "api-jwt"})
+        react_div = soup.find("div", {"data-react-class": "marketplace/product_detail/app"})
+        jwt = jwt_meta["content"] if jwt_meta and jwt_meta.has_attr("content") else None
+        props_dict = None
+        if react_div and react_div.has_attr("data-react-props"):
+            raw_props = react_div["data-react-props"]
+            json_props = html.unescape(raw_props)
+            props_dict = json.loads(json_props)
+        return jwt, props_dict
+
+    def _find_drop_in_config(self, pricing_configs):
+        return next((cfg for cfg in pricing_configs if "drop in" in cfg.get("name", "").lower()), None)
+
+    def _get_provider_id(self, soup):
+        link = soup.find('a', href=lambda href: href and 'referer_id=' in href)
+        if link:
+            url = link['href']
+            parsed_url = urlparse(url)
+            query_params = parse_qs(parsed_url.query)
+            return query_params.get('referer_id', [None])[0]
+        return None
 
