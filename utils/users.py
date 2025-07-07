@@ -2,46 +2,11 @@ from queue import Queue
 import random
 
 user_pool = [
-  {
-      "email": "locust01@hisawyer.com",
-      "password": "password123",
-  },
-  {
-      "email": "locust02@hisawyer.com",
-      "password": "password123",
-  },
-  {
-      "email": "locust03@hisawyer.com",
-      "password": "password123",
-  },
-  {
-      "email": "locust04@hisawyer.com",
-      "password": "password123",
-  },
-  {
-      "email": "locust05@hisawyer.com",
-      "password": "password123",
-  },
-  {
-      "email": "locust06@hisawyer.com",
-      "password": "password123",
-  },
-  {
-      "email": "locust07@hisawyer.com",
-      "password": "password123",
-  },
-  {
-      "email": "locust08@hisawyer.com",
-      "password": "password123",
-  },
-  {
-      "email": "locust09@hisawyer.com",
-      "password": "password123",
-  },
-  {
-      "email": "locust10@hisawyer.com",
-      "password": "password123",
-  }
+    {
+        "email": f"locust{i:02d}@example.com",
+        "password": "password123",
+    }
+    for i in range(1, 101)
 ]
 
 user_queue: Queue = Queue()
