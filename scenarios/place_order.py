@@ -20,6 +20,8 @@ HTML_ACCEPT_HEADER = "text/html"
 JS_ACCEPT_HEADER = "text/javascript, application/javascript, application/ecmascript, application/x-ecmascript"
 FORM_HEADER = "application/x-www-form-urlencoded"
 
+BOOKING_FEE_ID = 306 # TODO does not work on prod
+
 class PlaceOrderScenario(SequentialTaskSet):
     """Scenario for simulating add-to-cart and checkout flow in Locust load test."""
 
@@ -135,7 +137,7 @@ class PlaceOrderScenario(SequentialTaskSet):
             data={
                 "authenticity_token": self.csrf_token,
                 "view": "",
-                "booking_fee_id": os.getenv('booking_fee_id'),
+                "booking_fee_id": BOOKING_FEE_ID,
                 f"provider_form_responses[{provider_id}][id]": "",
                 f"provider_form_responses[{provider_id}][response]": "true",
                 "provider_fee_ids": "",
