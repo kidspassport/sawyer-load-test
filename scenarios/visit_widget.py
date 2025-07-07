@@ -1,8 +1,10 @@
 from locust import SequentialTaskSet, task
 from datetime import datetime
 import os
-from bs4 import BeautifulSoup
 import json
+import random
+from urllib.parse import urlencode
+
 
 class VisitWidgetScenario(SequentialTaskSet):
     def on_start(self):
@@ -11,46 +13,70 @@ class VisitWidgetScenario(SequentialTaskSet):
     @task
     def visit_widget(self):
         now = datetime.now()
+        html_headers = {"Accept": "text/html"}
+        json_headers = {"Accept": "application/json"}
+
+        number_of_ages = random.choice(range(1, 10))
+        age_ranges = random.sample(range(11, 31), k=number_of_ages)
+        month = random.randint(1, 12)
+        year = now.year
+        time_picker_min = random.randint(21600, 40000)
+        time_picker_max = random.randint(75000, 90000)
+        adults_only = random.choice([0, 1])
 
         self.client.get(  # Load widget calendar view
             f"/{self.slug}/schedules/widget_calendar",
-            headers={"Accept": "text/html"}
+            headers=html_headers
         )
 
         self.client.get(  # Load widget calendar view with time filters
-            f"/{self.slug}/schedules/widget_calendar?month={now.month}&year={now.year}&time_picker_max=77400&time_picker_min=25200",
-            headers={"Accept": "text/html"}
+            self._build_widget_calendar_filter_url({
+                "month": month,
+                "year": year,
+                "time_picker_max": time_picker_max,
+                "time_picker_min": time_picker_min
+            }),
+            headers=html_headers
         )
 
         self.client.get(  # Clear the filters
             f"/{self.slug}/schedules/widget_calendar",
-            headers={"Accept": "text/html"}
+            headers=html_headers
         )
 
         self.client.get(  # Load widget calendar view with age filters & time filters
-            f"/{self.slug}/schedules/widget_calendar?slug={self.slug}&month=6&year=2025&age_ranges%5B%5D=11&age_ranges%5B%5D=14&age_ranges%5B%5D=20&age_ranges%5B%5D=21&age_ranges%5B%5D=23&adults_only=1&time_picker_max=84600&time_picker_min=21600",
-            headers={"Accept": "text/html"}
+            self._build_widget_calendar_filter_url({
+                "month": month,
+                "year": year,
+                "time_picker_max": time_picker_max,
+                "time_picker_min": time_picker_min,
+                "age_ranges": age_ranges,
+                "adults_only": adults_only
+            }),
+            headers=html_headers
         )
 
         self.client.get(  # Visit widget list view
             f"/{self.slug}/schedules",
-            headers={"Accept": "text/html"}
+            headers=html_headers
         )
 
         scheduled_activities = self.client.get(  # Load data for widget list view
             f"/api/v1/widget/scheduled_activities?slug={self.slug}&page=1",
-            headers={"Accept": "application/json"}
+            headers=json_headers
         )
 
         data = json.loads(scheduled_activities.text)
         results = data.get("data", {}).get("results", [])
         asg_id = results[0]["id"] if results else None
 
-        filters_url = f"/{self.slug}/schedules?slug={self.slug}&age_ranges%5B%5D=15&age_ranges%5B%5D=16&age_ranges%5B%5D=22&age_ranges%5B%5D=23&time_picker_max=84600&time_picker_min=21600"
-
         self.client.get(  # Load widget list view w/ filters
-            filters_url,
-            headers={}
+            self._build_widget_filter_url({
+                "time_picker_max": time_picker_max,
+                "time_picker_min": time_picker_min,
+                "age_ranges": age_ranges
+            }),
+            headers=json_headers
         )
 
         if asg_id:
@@ -58,5 +84,8 @@ class VisitWidgetScenario(SequentialTaskSet):
                 f"/{self.slug}/schedules/activity-set/{asg_id}?source=semesters"
             )
 
+    def _build_widget_calendar_filter_url(self, params):
+        return f"/{self.slug}/schedules/widget_calendar?{urlencode(params, doseq=True)}"
 
-
+    def _build_widget_filter_url(self, params):
+        return f"/{self.slug}/schedules?{urlencode(params, doseq=True)}"
