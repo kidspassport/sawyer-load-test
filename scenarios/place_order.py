@@ -20,7 +20,7 @@ HTML_ACCEPT_HEADER = "text/html"
 JS_ACCEPT_HEADER = "text/javascript, application/javascript, application/ecmascript, application/x-ecmascript"
 FORM_HEADER = "application/x-www-form-urlencoded"
 
-class AddToCartScenario(SequentialTaskSet):
+class PlaceOrderScenario(SequentialTaskSet):
     """Scenario for simulating add-to-cart and checkout flow in Locust load test."""
 
     def on_start(self):
