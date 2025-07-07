@@ -1,0 +1,6 @@
+locust
+bs4
+flake8
+ipython
+autopep8
+ipdb
