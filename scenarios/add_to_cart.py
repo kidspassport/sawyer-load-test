@@ -1,169 +1,193 @@
-from locust import SequentialTaskSet, task
-from utils.auth import extract_csrf_token, login
+# Standard library imports
 import os
 import html
 import json
 import random
-from bs4 import BeautifulSoup
-from urllib.parse import urlparse, parse_qs
 import re
+from urllib.parse import urlparse, parse_qs
 from pprint import pprint
 
+# Third-party imports
+from locust import SequentialTaskSet, task
+from bs4 import BeautifulSoup
+
+# Local imports
+from utils.auth import extract_csrf_token, login
+
+# Constants
+API_ACCEPT_HEADER = "application/json"
+HTML_ACCEPT_HEADER = "text/html"
+JS_ACCEPT_HEADER = "text/javascript, application/javascript, application/ecmascript, application/x-ecmascript"
+FORM_HEADER = "application/x-www-form-urlencoded"
+
 class AddToCartScenario(SequentialTaskSet):
-  @task
-  def add_to_cart(self):
-    user = self.user.user  # The first .user is the HttpUser, the second is the user dict from utils/users.py
-    csrf_token = login(self.client, user) # TODO unclear naming: logging in or fetching csrf token or both?
+    """Scenario for simulating add-to-cart and checkout flow in Locust load test."""
 
-    # get a valid ASG ID
-    scheduled_activities = self.client.get( # Load data for widget list view
-      f"/api/v1/widget/scheduled_activities?slug={os.getenv('slug')}&page=1",
-      headers={
-        "Accept": "application/json"
-      }
-    )
-
-    data = json.loads(scheduled_activities.text)
-    results = data.get("data", {}).get("results", [])
-    activity_ids = [activity["id"] for activity in results]
-    asg_id = random.choice(activity_ids)
-
-
-    pdp_response = self.client.get( # Visit PDP for activity
-      f"/{os.getenv('slug')}/schedules/activity-set/{asg_id}?source=semesters"
-    )
-    csrf_token = extract_csrf_token(pdp_response.text)
-
-    soup = BeautifulSoup(pdp_response.text, "html.parser")
-    jwt_meta = soup.find("meta", attrs={"name": "api-jwt"})
-    react_div = soup.find("div", {"data-react-class": "marketplace/product_detail/app"})
-
-    if jwt_meta and jwt_meta.has_attr("content") and react_div and react_div.has_attr("data-react-props"):
-      jwt = jwt_meta["content"]
-      raw_props = react_div["data-react-props"]
-      json_props = html.unescape(raw_props)
-      props_dict = json.loads(json_props)
-
-      pricing_configs = props_dict.get("staticData", {}).get("pricing", {}).get("pricing_configurations", [])
-      drop_in_config = next(
-        (cfg for cfg in pricing_configs if "drop in" in cfg.get("name", "").lower()),
-        None
-      )
-
-      if drop_in_config:
-        drop_in_config_id = drop_in_config["id"]
-      else:
-        raise Exception("Drop In pricing configuration not found in PDP response")
-
-
-      if drop_in_config_id:
-        pricing_response = self.client.get(
-          f"/{os.getenv('slug')}/schedules/activity-set/{asg_id}/free-drop-in/{drop_in_config_id}/?source=semesters",
-          headers={
-            "Authorization": f"Bearer {jwt}",
-            "Accept": "text/javascript, application/javascript, application/ecmascript, application/x-ecmascript",
-            "X-Requested-With": "XMLHttpRequest"
-          }
+    def _get_activity_ids(self):
+        """Fetch all activity session group IDs from the widget API."""
+        response = self.client.get(
+            f"/api/v1/widget/scheduled_activities?slug={os.getenv('slug')}&page=1",
+            headers={"Accept": API_ACCEPT_HEADER}
         )
-        # print(pricing_response.text)
-        session_ids = re.findall(r'data-item=\\"(\d+)\\"', pricing_response.text)
-        child_ids = re.findall(r'children_(\d{4,8})', pricing_response.text)
+        data = json.loads(response.text)
+        return [activity["id"] for activity in data.get("data", {}).get("results", [])]
 
+    def _get_jwt_and_props(self, pdp_html):
+        """Extract JWT token and React props from PDP HTML."""
+        soup = BeautifulSoup(pdp_html, "html.parser")
+        jwt_meta = soup.find("meta", attrs={"name": "api-jwt"})
+        react_div = soup.find("div", {"data-react-class": "marketplace/product_detail/app"})
+        jwt = jwt_meta["content"] if jwt_meta and jwt_meta.has_attr("content") else None
+        props_dict = None
+        if react_div and react_div.has_attr("data-react-props"):
+            raw_props = react_div["data-react-props"]
+            json_props = html.unescape(raw_props)
+            props_dict = json.loads(json_props)
+        return jwt, props_dict
+
+    def _find_drop_in_config(self, pricing_configs):
+        """Find the first pricing config with a name containing 'drop in'."""
+        return next((cfg for cfg in pricing_configs if "drop in" in cfg.get("name", "").lower()), None)
+
+    def _extract_ids_from_js_html(self, text, session_pattern, child_pattern):
+        """Extract session and child IDs from JS-injected HTML using regex."""
+        session_ids = re.findall(session_pattern, text)
+        child_ids = re.findall(child_pattern, text)
+        return session_ids, child_ids
+
+    def _get_provider_id(self, soup):
+        """Extract provider_id from a link in the checkout page."""
+        link = soup.find('a', href=lambda href: href and 'referer_id=' in href)
+        if link:
+            url = link['href']
+            parsed_url = urlparse(url)
+            query_params = parse_qs(parsed_url.query)
+            return query_params.get('referer_id', [None])[0]
+        return None
+
+    @task
+    def add_to_cart(self):
+        """Main task: simulate add-to-cart and checkout flow."""
+        user = self.user.user
+        csrf_token = login(self.client, user)
+
+        # Get a valid ASG ID
+        activity_ids = self._get_activity_ids()
+        if not activity_ids:
+            print("No activity IDs found.")
+            return
+        asg_id = random.choice(activity_ids)
+
+        # Visit PDP for activity
+        pdp_response = self.client.get(f"/{os.getenv('slug')}/schedules/activity-set/{asg_id}?source=semesters")
+        csrf_token = extract_csrf_token(pdp_response.text)
+        jwt, props_dict = self._get_jwt_and_props(pdp_response.text)
+
+        if not jwt or not props_dict:
+            print("JWT or React props not found on PDP page.")
+            return
+
+        pricing_configs = props_dict.get("staticData", {}).get("pricing", {}).get("pricing_configurations", [])
+        drop_in_config = self._find_drop_in_config(pricing_configs)
+        if not drop_in_config:
+            print("Drop In pricing configuration not found in PDP response.")
+            return
+        drop_in_config_id = drop_in_config["id"]
+
+        # Get session and child IDs from JS-injected HTML
+        pricing_response = self.client.get(
+            f"/{os.getenv('slug')}/schedules/activity-set/{asg_id}/free-drop-in/{drop_in_config_id}/?source=semesters",
+            headers={
+                "Authorization": f"Bearer {jwt}",
+                "Accept": JS_ACCEPT_HEADER,
+                "X-Requested-With": "XMLHttpRequest"
+            }
+        )
+        session_ids, child_ids = self._extract_ids_from_js_html(
+            pricing_response.text,
+            r'data-item=\\"(\\d+)\\"',
+            r'children_(\\d{4,8})'
+        )
         if not session_ids or not child_ids:
-          return
-
+            print("No session or child IDs found.")
+            return
         session_id = random.choice(session_ids)
         child_id = random.choice(child_ids)
 
-        # TODO if session_id
-        add_to_cart_response = self.client.post( # Add to cart
-          "/cart/item/subtotal",
-          data={
-            "authenticity_token": csrf_token,
-            "item_type": "provider_free_dropin",
-            "activity_session_group_id": asg_id,
-            # "semester_id": os.getenv('semester_id'), #TODO
-            "semester_id": 508485, #TODO
-            "session_ids[]": session_id,
-            "view": "",
-            "add_to_cart_source": "widget",
-            "participants[]": f"children_{child_id}",
-            # "payment_plan_v2_enabled": "true",
-            "button": "add-to-cart"
-          },
-          headers={
-            "Content-Type": "application/x-www-form-urlencoded",
-            "X-Requested-With": "XMLHttpRequest",
-            "Accept": "text/javascript"
-          }
+        # Add to cart
+        add_to_cart_response = self.client.post(
+            "/cart/item/subtotal",
+            data={
+                "authenticity_token": csrf_token,
+                "item_type": "provider_free_dropin",
+                "activity_session_group_id": asg_id,
+                "semester_id": 508485,  # TODO: parameterize
+                "session_ids[]": session_id,
+                "view": "",
+                "add_to_cart_source": "widget",
+                "participants[]": f"children_{child_id}",
+                "button": "add-to-cart"
+            },
+            headers={
+                "Content-Type": FORM_HEADER,
+                "X-Requested-With": "XMLHttpRequest",
+                "Accept": "text/javascript"
+            }
         )
 
+        # Precheckout steps
         self.client.get(
-          f"/{os.getenv('slug')}/schedules/precheckout/steps",
-          headers={
-            "Accept": "text/html"
-          }
+            f"/{os.getenv('slug')}/schedules/precheckout/steps",
+            headers={"Accept": HTML_ACCEPT_HEADER}
+        )
+        self.client.get(
+            "/pretend-school/schedules/precheckout/steps/next",
+            headers={"Accept": HTML_ACCEPT_HEADER}
         )
 
-        self.client.get( # Go past the precheckout form
-          "/pretend-school/schedules/precheckout/steps/next",
-          headers={
-            "Accept": "text/html"
-          }
-        )
-
+        # Checkout
         checkout_response = self.client.get(
-          "/pretend-school/schedules/checkout",
-          headers={
-            "Accept": "text/html"
-          }
+            "/pretend-school/schedules/checkout",
+            headers={"Accept": HTML_ACCEPT_HEADER}
         )
-
         soup = BeautifulSoup(checkout_response.text, 'html.parser')
 
-
-        # Refresh the CSRF token from a meta tag or hidden input
+        # Refresh the CSRF token
         meta = soup.find("meta", attrs={"name": "csrf-token"})
         if meta:
-          self.csrf_token = meta["content"]
+            self.csrf_token = meta["content"]
         else:
-          input_tag = soup.find("input", attrs={"name": "authenticity_token"})
-          if input_tag:
-            self.csrf_token = input_tag["value"]
-
+            input_tag = soup.find("input", attrs={"name": "authenticity_token"})
+            if input_tag:
+                self.csrf_token = input_tag["value"]
         if not self.csrf_token:
-          raise Exception("CSRF token not found on checkout page")
+            print("CSRF token not found on checkout page.")
+            return
 
-        link = soup.find('a', href=lambda href: href and 'referer_id=' in href)
-        if link:
-          url = link['href']
-          parsed_url = urlparse(url)
-          query_params = parse_qs(parsed_url.query)
-          provider_id = query_params.get('referer_id', [None])[0]
-
+        provider_id = self._get_provider_id(soup)
         if not provider_id:
-          raise Exception("Could not find provider id on page")
+            print("Could not find provider id on page.")
+            return
 
-        # place the order
+        # Place the order
         place_order_response = self.client.post(
-          f"/{os.getenv('slug')}/schedules/checkout/place_order",
-          data={
-            "authenticity_token": self.csrf_token,
-            "view": "",
-            "booking_fee_id": os.getenv('booking_fee_id'), # 😭😭😭
-            f"provider_form_responses[{provider_id}][id]": "",
-            f"provider_form_responses[{provider_id}][response]": "true",
-            "provider_fee_ids": "",
-            "one_off_payment_method_type": "",
-            "button": "place-order",
-            "slug": f"{os.getenv('slug')}"
-          },
-          headers={
-            "Content-Type": "application/x-www-form-urlencoded",
-            "X-Requested-With": "XMLHttpRequest",
-            "Accept": "text/javascript"
-          }
+            f"/{os.getenv('slug')}/schedules/checkout/place_order",
+            data={
+                "authenticity_token": self.csrf_token,
+                "view": "",
+                "booking_fee_id": os.getenv('booking_fee_id'),
+                f"provider_form_responses[{provider_id}][id]": "",
+                f"provider_form_responses[{provider_id}][response]": "true",
+                "provider_fee_ids": "",
+                "one_off_payment_method_type": "",
+                "button": "place-order",
+                "slug": f"{os.getenv('slug')}"
+            },
+            headers={
+                "Content-Type": FORM_HEADER,
+                "X-Requested-With": "XMLHttpRequest",
+                "Accept": "text/javascript"
+            }
         )
-
-        print(f"{user["email"]} placed an order")
+        print(f"{user['email']} placed an order")
 
