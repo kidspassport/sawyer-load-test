@@ -7,18 +7,16 @@ from urllib.parse import urlencode
 
 
 class VisitWidgetScenario(SequentialTaskSet):
-    # def on_start(self):
-    # self.user = self.user
-    # self.csrf_token = self.csrf_token
+    def on_start(self):
+        self.slug = self.user.environment.parsed_options.slug
 
     @task
     def visit_widget(self):
         now = datetime.now()
-        slug = os.getenv('slug')
         html_headers = {"Accept": "text/html"}
         json_headers = {"Accept": "application/json"}
 
-        number_of_ages = random.sample(range(1, 10))
+        number_of_ages = random.choice(range(1, 10))
         age_ranges = random.sample(range(11, 31), k=number_of_ages)
         month = random.randint(1, 12)
         year = now.year
@@ -27,12 +25,12 @@ class VisitWidgetScenario(SequentialTaskSet):
         adults_only = random.choice([0, 1])
 
         self.client.get(  # Load widget calendar view
-            f"/{slug}/schedules/widget_calendar",
+            f"/{self.slug}/schedules/widget_calendar",
             headers=html_headers
         )
 
         self.client.get(  # Load widget calendar view with time filters
-            self.build_widget_calendar_filter_url({
+            self._build_widget_calendar_filter_url({
                 "month": month,
                 "year": year,
                 "time_picker_max": time_picker_max,
@@ -42,12 +40,12 @@ class VisitWidgetScenario(SequentialTaskSet):
         )
 
         self.client.get(  # Clear the filters
-            f"/{slug}/schedules/widget_calendar",
+            f"/{self.slug}/schedules/widget_calendar",
             headers=html_headers
         )
 
         self.client.get(  # Load widget calendar view with age filters & time filters
-            self.build_widget_calendar_filter_url({
+            self._build_widget_calendar_filter_url({
                 "month": month,
                 "year": year,
                 "time_picker_max": time_picker_max,
@@ -59,12 +57,12 @@ class VisitWidgetScenario(SequentialTaskSet):
         )
 
         self.client.get(  # Visit widget list view
-            f"/{slug}/schedules",
+            f"/{self.slug}/schedules",
             headers=html_headers
         )
 
         scheduled_activities = self.client.get(  # Load data for widget list view
-            f"/api/v1/widget/scheduled_activities?slug={slug}&page=1",
+            f"/api/v1/widget/scheduled_activities?slug={self.slug}&page=1",
             headers=json_headers
         )
 
@@ -73,7 +71,7 @@ class VisitWidgetScenario(SequentialTaskSet):
         asg_id = results[0]["id"] if results else None
 
         self.client.get(  # Load widget list view w/ filters
-            self.build_widget_filter_url({
+            self._build_widget_filter_url({
                 "time_picker_max": time_picker_max,
                 "time_picker_min": time_picker_min,
                 "age_ranges": age_ranges
@@ -83,11 +81,11 @@ class VisitWidgetScenario(SequentialTaskSet):
 
         if asg_id:
             self.client.get(  # Visit PDP from widget
-                f"/{slug}/schedules/activity-set/{asg_id}?source=semesters"
+                f"/{self.slug}/schedules/activity-set/{asg_id}?source=semesters"
             )
 
-    def build_widget_calendar_filter_url(self, params):
-        return f"/{os.getenv('slug')}/schedules/widget_calendar?{urlencode(params, doseq=True)}"
+    def _build_widget_calendar_filter_url(self, params):
+        return f"/{self.slug}/schedules/widget_calendar?{urlencode(params, doseq=True)}"
 
-    def build_widget_filter_url(self, params):
-        return f"/{os.getenv('slug')}/schedules?{urlencode(params, doseq=True)}"
+    def _build_widget_filter_url(self, params):
+        return f"/{self.slug}/schedules?{urlencode(params, doseq=True)}"

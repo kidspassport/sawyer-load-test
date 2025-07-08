@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 # from utils.auth import extract_csrf_token
 
 
-class AddToCartPlaceOrderFlow(SequentialTaskSet):
+class AddToCartPlaceOrderDemoFlow(SequentialTaskSet):
     # note: This was a POC, and does not reflect a realistic flow.
     # It correctly tests adding to cart and placing an order.
     # The pre-checkout/checkout steps are partially reflected, but not complete.
