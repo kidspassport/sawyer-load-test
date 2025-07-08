@@ -1,7 +1,6 @@
 from locust import HttpUser, between, events
 from scenarios.visit_widget import VisitWidgetScenario
 from scenarios.place_order import PlaceOrderScenario
-from scenarios.rush import RushScenario
 from utils.auth import login
 from utils.users import get_random_user
 import os
@@ -29,6 +28,6 @@ class RailsUser(HttpUser):
 # https://docs.locust.io/en/stable/extending-locust.html#custom-arguments
 @events.init_command_line_parser.add_listener
 def custom_args(parser):
-    parser.add_argument("--scenario", choices=["add_to_cart",
-                        "visit_widget", "rush"], default="add_to_cart", help="Scenario")
+    parser.add_argument("--scenario", choices=["place_order",
+                        "visit_widget", "rush"], default="place_order", help="Scenario")
     parser.add_argument("--slug", is_required=True, default="pretend-school")

@@ -3,7 +3,7 @@ import random
 
 user_pool = [
     {
-        "email": f"locust{i:02d}@example.com",
+        "email": f"locust_{i:02d}@hisawyer.com",
         "password": "password123",
     }
     for i in range(1, 101)

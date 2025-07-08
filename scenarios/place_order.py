@@ -5,7 +5,6 @@ import json
 import random
 import re
 from urllib.parse import urlparse, parse_qs
-from pprint import pprint
 
 # Third-party imports
 from locust import SequentialTaskSet, task
