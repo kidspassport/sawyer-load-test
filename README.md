@@ -13,74 +13,101 @@ This project contains load testing scripts for simulating real user behavior on 
 
 2. **Install Python 3 and pip (macOS 15+)**
 
-    Open Terminal and run:
+  Open Terminal and run:
 
-    ```sh
-    brew install python
-    ```
+  ```sh
+  brew install python
+  ```
 
-    This will install the latest Python 3 and pip via [Homebrew](https://brew.sh/).
-    If you don’t have Homebrew, install it first:
+  This will install the latest Python 3 and pip via [Homebrew](https://brew.sh/).
+  If you don’t have Homebrew, install it first:
 
-    ```sh
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-    ```
+  ```sh
+  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  ```
 
-    Verify installation and check Python and pip versions:
+  Verify installation and check Python and pip versions:
 
-    ```sh
-    python3 --version
-    pip3 --version
-    ```
+  ```sh
+  python3 --version
+  pip3 --version
+  ```
 
 3. **Install Locust**
 
-    Use pip to install Locust:
+  Use pip to install Locust:
 
-    ```sh
-    pip3 install locust
-    ```
+  ```sh
+  pip3 install locust
+  ```
 
-    Verify installation and check Locust version:
+  Verify installation and check Locust version:
 
-    ```sh
-    locust --version
-    ```
+  ```sh
+  locust --version
+  ```
 
 ## Running Tests
 
 ### Environment Requirements
 1. **Users**
-    - Requires the target DB to have 1,000 `Member`s
-      - username: locust_##@hisawyer.com
-      - password: password123
-      - must have at least 1 `Child`
-    - Staging already has these users set up.  You can create them locally with this script:
+  - Requires the target DB to have 1,000 `Member`s
+    - username: locust_##@hisawyer.com
+    - password: password123
+    - must have at least 1 `Child`
+  - Staging already has these users set up.  You can create them locally with this script:
 
-    ```ruby
-    [*1..1000].each do |i|
-      member = Member.create(email: "locust_#{i.to_s.rjust(2, '0')}@hisawyer.com", password: "password123", confirmed_at: Time.now)
-      Child.create(member:, name: "Baby Locust #{i.to_s.rjust(2, '0')}", date_of_birth: (Date.today - 5.years))
-    end
-    ```
+  ```ruby
+  [*1..1000].each do |i|
+    member = Member.create(email: "locust_#{i.to_s.rjust(2, '0')}@hisawyer.com", password: "password123", confirmed_at: Time.now)
+    Child.create(member:, name: "Baby Locust #{i.to_s.rjust(2, '0')}", date_of_birth: (Date.today - 5.years))
+  end
+  ```
 
 2. **Providers**
-    The target provider must have at least one activity with the following properties:
-    - Semester
-    - Current dates (or upcoming within a week or so)
-    - Public (must appear on provider's "Live View"/widget)
-    - Permissive age settings
-    - Free Drop Ins – this is the only Pricing Configuration the script can handle.
-    - Multiple activities are OK, and the test will use all of them
+
+  The target provider must have at least one activity with the following properties:
+  - Semester
+  - Current dates (or upcoming within a week or so)
+  - Public (must appear on provider's "Live View"/widget)
+  - Permissive age settings
+  - Free Drop Ins – this is the only Pricing Configuration the script can handle.
+  - Multiple activities are OK, and the test will use all of them
 
 3. **Test Runner**
-    Just run
-    ```bash
-    locust
-    ```
-    to bring up the test runner.
 
-    ![Test Runner Screenshot](images/test_runner.png)
+  Just run
+  ```bash
+  locust
+  ```
+  and visit `localhost:8089` to bring up the test runner.
+
+  ![Test Runner Screenshot](images/test_runner.png)
+
+  Fill in the number of users you want to include in the test, and add the target URL to the Host field.
+
+  Click to expand the "Custom Parameters" section.
+
+  ![Custom Parameters Screenshot](images/test_runner.png)
+
+  - Booking Fee Id is unique per environment. On staging it is 306, and if your DB is cloned from staging it will be the same.
+    - (Ideally, we will remove this in the future.  For now, it's not possible to extract this from the checkout form without successfully completing the provider form questions on the pre-checkout form.)
+  - Scenario defines the task(s) to execute.
+    - Scenario logic lives in the `scenarios/` folder, and this drop-down is configured in `locustfile.py`.
+  - Slug should be the slug of the target provider
+
+4. **Multiple Runners**
+
+  You can run multiple instances of Locust by starting them on different ports.
+
+  Run
+  ```bash
+  locust --web-port 8090
+  ```
+  and visit `localhost:8090`.
+
+  This is useful for testing different scenarios or providers at the same time.
+
 
 ## Development
 
