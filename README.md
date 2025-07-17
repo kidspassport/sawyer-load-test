@@ -49,7 +49,39 @@ locust --version
 ```
 
 ## Running Tests
-TODO
+
+### Environment Requirements
+1. **Users**
+- Requires the target DB to have 1,000 `Member`s
+  - username: locust_##@hisawyer.com
+  - password: password123
+  - must have at least 1 `Child`
+- Staging already has these users set up.  You can create them locally with this script:
+
+```ruby
+[*1..1000].each do |i|
+   member = Member.create(email: "locust_#{i.to_s.rjust(2, '0')}@hisawyer.com", password: "password123", confirmed_at: Time.now)
+   Child.create(member:, name: "Baby Locust #{i.to_s.rjust(2, '0')}", date_of_birth: (Date.today - 5.years))
+end
+```
+
+2. **Providers**
+The target provider must have at least one activity with the following properties:
+- Semester
+- Current dates (or upcoming within a week or so)
+- Public (must appear on provider's "Live View"/widget)
+- Permissive age settings
+- Free Drop Ins – this is the only Pricing Configuration the script can handle.
+- Multiple activities are OK, and the test will use all of them
+
+3. **Test Runner**
+Just run
+```bash
+locust
+```
+to bring up the test runner.
+
+![Test Runner Screenshot](images/test_runner.png)
 
 ## Development
 
