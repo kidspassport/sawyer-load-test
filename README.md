@@ -2,34 +2,54 @@
 
 This project contains load testing scripts for simulating real user behavior on our application. We use [Locust](https://locust.io/), an open-source load testing tool that allows you to define user behavior in Python code and generate realistic, concurrent traffic. It's ideal for identifying performance bottlenecks, validating scalability, and establishing performance baselines.
 
-## System Requirements
-
-- macOS (tested on macOS 15+)
-- Python 3.8 or newer
-- `pip` (or `pip3`) package manager
-- Optional: [Homebrew](https://brew.sh/) for installing Python easily
-
-## Installation
+## Installation (MacOS 15+)
 
 1. **Clone this repository**:
 
    ```bash
-   bash
-   git clone https://github.com/kidspassport/to-do
+   git clone https://github.com/kidspassport/sawyer-load-test
    cd load-tests
    ```
 
-2. **(Optional) Create a virtual environment**:
+2. **Install Python 3 and pip (macOS 15+)**
 
-  ```bash
-  python3 -m venv venv
-  source venv/bin/activate
-  ```
+Open Terminal and run:
 
-1. **Install dependencies**:
-  pip install -r requirements.txt
+```sh
+brew install python
+```
 
-2. For more information, see the official Locust installation guide: <https://docs.locust.io/en/stable/installation.html>
+This will install the latest Python 3 and pip via [Homebrew](https://brew.sh/).
+If you don’t have Homebrew, install it first:
+
+```sh
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+Verify installation and check Python and pip versions:
+
+```sh
+python3 --version
+pip3 --version
+```
+
+3. **Install Locust**
+
+Use pip to install Locust:
+
+```sh
+pip3 install locust
+```
+
+
+Verify installation and check Locust version:
+
+```sh
+locust --version
+```
+
+## Running Tests
+TODO
 
 ## Development
 
