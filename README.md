@@ -88,7 +88,7 @@ This project contains load testing scripts for simulating real user behavior on 
 
   Click to expand the "Custom Parameters" section.
 
-  ![Custom Parameters Screenshot](images/test_runner.png)
+  ![Custom Parameters Screenshot](images/custom_parameters.png)
 
   - Booking Fee Id is unique per environment. On staging it is 306, and if your DB is cloned from staging it will be the same.
     - (Ideally, we will remove this in the future.  For now, it's not possible to extract this from the checkout form without successfully completing the provider form questions on the pre-checkout form.)
