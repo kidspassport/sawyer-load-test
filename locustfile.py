@@ -10,7 +10,8 @@ class RailsUser(HttpUser):
 
     def on_start(self):
         self.user = get_random_user()
-        self.csrf_token = login(self.client, self.user)
+        # self.csrf_token = login(self.client, self.user)
+        # login(self.client, self.user)
 
         scenario = self.environment.parsed_options.scenario
         if scenario == "view_explore":
@@ -31,3 +32,4 @@ def custom_args(parser):
     parser.add_argument("--scenario", choices=["place_order",
                         "visit_widget", "rush"], default="place_order", help="Scenario")
     parser.add_argument("--slug", is_required=True, default="pretend-school")
+    parser.add_argument("--booking_fee_id", is_required=True, default="306")

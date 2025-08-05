@@ -3,6 +3,7 @@ from datetime import datetime
 import os
 import json
 import random
+import time
 from urllib.parse import urlencode
 
 
@@ -39,10 +40,14 @@ class VisitWidgetScenario(SequentialTaskSet):
             headers=html_headers
         )
 
+        time.sleep(random.uniform(1, 10))
+
         self.client.get(  # Clear the filters
             f"/{self.slug}/schedules/widget_calendar",
             headers=html_headers
         )
+
+        time.sleep(random.uniform(1, 10))
 
         self.client.get(  # Load widget calendar view with age filters & time filters
             self._build_widget_calendar_filter_url({
@@ -56,6 +61,8 @@ class VisitWidgetScenario(SequentialTaskSet):
             headers=html_headers
         )
 
+        time.sleep(random.uniform(1, 10))
+
         self.client.get(  # Visit widget list view
             f"/{self.slug}/schedules",
             headers=html_headers
@@ -66,9 +73,11 @@ class VisitWidgetScenario(SequentialTaskSet):
             headers=json_headers
         )
 
-        data = json.loads(scheduled_activities.text)
+        data = json.loads(scheduled_activities.text) # TODO drawing an error here: JSONDecodeError("Expecting value", s, err.value) from Nonejson.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
         results = data.get("data", {}).get("results", [])
         asg_id = results[0]["id"] if results else None
+
+        time.sleep(random.uniform(1, 10))
 
         self.client.get(  # Load widget list view w/ filters
             self._build_widget_filter_url({
@@ -76,7 +85,14 @@ class VisitWidgetScenario(SequentialTaskSet):
                 "time_picker_min": time_picker_min,
                 "age_ranges": age_ranges
             }),
-            headers=json_headers
+            headers=html_headers
+        )
+
+        time.sleep(random.uniform(1, 10))
+
+        self.client.get(  # Visit widget list view
+            f"/{self.slug}/schedules",
+            headers=html_headers
         )
 
         if asg_id:

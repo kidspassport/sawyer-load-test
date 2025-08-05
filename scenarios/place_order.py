@@ -4,6 +4,7 @@ import html
 import json
 import random
 import re
+import time
 from urllib.parse import urlparse, parse_qs
 
 # Third-party imports
@@ -19,18 +20,22 @@ HTML_ACCEPT_HEADER = "text/html"
 JS_ACCEPT_HEADER = "text/javascript, application/javascript, application/ecmascript, application/x-ecmascript"
 FORM_HEADER = "application/x-www-form-urlencoded"
 
-BOOKING_FEE_ID = 306 # TODO does not work on prod
+# BOOKING_FEE_ID = 306 # TODO does not work on prod
 
 class PlaceOrderScenario(SequentialTaskSet):
     """Scenario for simulating add-to-cart and checkout flow in Locust load test."""
 
     def on_start(self):
         self.slug = self.user.environment.parsed_options.slug
+        self.booking_fee_id = self.user.environment.parsed_options.booking_fee_id
 
     @task
     def add_to_cart(self):
         user = self.user.user
+        time.sleep(random.uniform(1, 10))
         csrf_token = login(self.client, user)
+
+        time.sleep(random.uniform(1, 10))
 
         # Get a valid ASG ID
         activity_ids = self._get_activity_ids()
@@ -38,6 +43,8 @@ class PlaceOrderScenario(SequentialTaskSet):
             print("No activity IDs found.")
             return
         asg_id = random.choice(activity_ids)
+
+        time.sleep(random.uniform(1, 10))
 
         # Visit PDP for activity
         pdp_response = self.client.get(f"/{self.slug}/schedules/activity-set/{asg_id}?source=semesters")
@@ -54,6 +61,8 @@ class PlaceOrderScenario(SequentialTaskSet):
             print("Drop In pricing configuration not found in PDP response.")
             return
         drop_in_config_id = drop_in_config["id"]
+
+        time.sleep(random.uniform(1, 10))
 
         # Get session and child IDs from JS-injected HTML
         pricing_response = self.client.get(
@@ -75,6 +84,8 @@ class PlaceOrderScenario(SequentialTaskSet):
         session_id = random.choice(session_ids)
         child_id = random.choice(child_ids)
 
+        time.sleep(random.uniform(1, 10))
+
         # Add to cart
         add_to_cart_response = self.client.post(
             "/cart/item/subtotal",
@@ -82,7 +93,7 @@ class PlaceOrderScenario(SequentialTaskSet):
                 "authenticity_token": csrf_token,
                 "item_type": "provider_free_dropin",
                 "activity_session_group_id": asg_id,
-                "semester_id": 508485,  # TODO: parameterize
+                "semester_id": session_id,
                 "session_ids[]": session_id,
                 "view": "",
                 "add_to_cart_source": "widget",
@@ -96,19 +107,26 @@ class PlaceOrderScenario(SequentialTaskSet):
             }
         )
 
+        time.sleep(random.uniform(1, 10))
+
         # Precheckout steps
         self.client.get(
             f"/{self.slug}/schedules/precheckout/steps",
             headers={"Accept": HTML_ACCEPT_HEADER}
         )
+
+        time.sleep(random.uniform(1, 10))
+
         self.client.get(
-            "/pretend-school/schedules/precheckout/steps/next",
+            f"/{self.slug}/schedules/precheckout/steps/next",
             headers={"Accept": HTML_ACCEPT_HEADER}
         )
 
+        time.sleep(random.uniform(1, 10))
+
         # Checkout
         checkout_response = self.client.get(
-            "/pretend-school/schedules/checkout",
+            f"/{self.slug}/schedules/checkout",
             headers={"Accept": HTML_ACCEPT_HEADER}
         )
         soup = BeautifulSoup(checkout_response.text, 'html.parser')
@@ -130,13 +148,15 @@ class PlaceOrderScenario(SequentialTaskSet):
             print("Could not find provider id on page.")
             return
 
+        time.sleep(random.uniform(1, 10))
+
         # Place the order
         place_order_response = self.client.post(
             f"/{self.slug}/schedules/checkout/place_order",
             data={
                 "authenticity_token": self.csrf_token,
                 "view": "",
-                "booking_fee_id": BOOKING_FEE_ID,
+                "booking_fee_id": self.booking_fee_id,
                 f"provider_form_responses[{provider_id}][id]": "",
                 f"provider_form_responses[{provider_id}][response]": "true",
                 "provider_fee_ids": "",
@@ -151,6 +171,8 @@ class PlaceOrderScenario(SequentialTaskSet):
             }
         )
         print(f"{user['email']} placed an order")
+
+        time.sleep(random.uniform(1, 10))
 
     def _get_activity_ids(self):
         response = self.client.get(
