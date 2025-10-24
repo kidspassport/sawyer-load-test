@@ -56,6 +56,12 @@ class PlaceOrderScenario(SequentialTaskSet):
             return
 
         pricing_configs = props_dict.get("staticData", {}).get("pricing", {}).get("pricing_configurations", [])
+        print(pricing_configs)
+
+        semester_config = self._find_semester_config(pricing_configs)
+        print("semester config:")
+        print(semester_config)
+
         drop_in_config = self._find_drop_in_config(pricing_configs)
         if not drop_in_config:
             print("Drop In pricing configuration not found in PDP response.")
@@ -196,6 +202,9 @@ class PlaceOrderScenario(SequentialTaskSet):
 
     def _find_drop_in_config(self, pricing_configs):
         return next((cfg for cfg in pricing_configs if "drop in" in cfg.get("name", "").lower()), None)
+
+    def _find_semester_config(self, pricing_configs):
+        return next((cfg for cfg in pricing_configs if "semester" in cfg.get("name", "").lower()), None)
 
     def _get_provider_id(self, soup):
         link = soup.find('a', href=lambda href: href and 'referer_id=' in href)

@@ -28,7 +28,13 @@ def login(client, user):
 
         print(f"{user["email"]} logging in with password {user["password"]}")
         response = client.get("/auth/log-in")
+        # response = client.get("/ps58-brooklyn/auth/log-in")
+
         csrf_token = extract_csrf_token(response.text)
+        print(csrf_token)
+
+
+
         if not csrf_token:
             raise Exception("CSRF token not found on sign-in page")
 
@@ -37,12 +43,18 @@ def login(client, user):
             "member[email]": user["email"],
             "member[password]": user["password"],
             "session[member][email]": user["email"],
-            "session[member][password]": user["password"]
+            "session[member][password]": user["password"],
+            # "commit": "Log in",
         }
 
-        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        }
+        # headers = {"Content-Type": "application/json"}
 
         login_response = client.post("/api/v1/marketplace/auth/log-in", data=payload, headers=headers)
+        # login_response = client.post("/ps58-brooklyn/auth/log-in", json=payload, headers=headers)
+        # print("LOGIN RESPONSE:")
         # print(login_response.text)
         if login_response.status_code not in [200, 302]:
             raise Exception(f"Login failed with status {login_response.status_code}")

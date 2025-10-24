@@ -88,27 +88,27 @@ class ProductionWidgetPdpScenario(SequentialTaskSet):
         time.sleep(random.uniform(1, 10))
 
         # Place the order
-        place_order_response = self.client.post( # This raises a CSRF error on production
-            f"/{self.slug}/schedules/checkout/place_order",
-            data={
-                "authenticity_token": self.csrf_token,
-                "view": "",
-                "booking_fee_id": self.booking_fee_id,
-                f"provider_form_responses[{provider_id}][id]": "",
-                f"provider_form_responses[{provider_id}][response]": "true",
-                "provider_fee_ids": "",
-                "one_off_payment_method_type": "",
-                "button": "place-order",
-                "slug": f"{self.slug}"
-            },
-            headers={
-                "Content-Type": FORM_HEADER,
-                "X-Requested-With": "XMLHttpRequest",
-                "Accept": "text/javascript",
-                "x-csrf-token": self.csrf_token,
-            }
-        )
-        print(f"{user['email']} placed an order")
+        # place_order_response = self.client.post( # This raises a CSRF error on production
+        #     f"/{self.slug}/schedules/checkout/place_order",
+        #     data={
+        #         "authenticity_token": self.csrf_token,
+        #         "view": "",
+        #         "booking_fee_id": self.booking_fee_id,
+        #         f"provider_form_responses[{provider_id}][id]": "",
+        #         f"provider_form_responses[{provider_id}][response]": "true",
+        #         "provider_fee_ids": "",
+        #         "one_off_payment_method_type": "",
+        #         "button": "place-order",
+        #         "slug": f"{self.slug}"
+        #     },
+        #     headers={
+        #         "Content-Type": FORM_HEADER,
+        #         "X-Requested-With": "XMLHttpRequest",
+        #         "Accept": "text/javascript",
+        #         "x-csrf-token": self.csrf_token,
+        #     }
+        # )
+        print(f"{user['email']} 'placed' an order")
 
         time.sleep(random.uniform(1, 10))
 
@@ -204,8 +204,8 @@ class ProductionWidgetPdpScenario(SequentialTaskSet):
             }
         )
 
-        # print("pricing response:")
-        # print(pricing_response.text)
+        print("pricing response:")
+        print(pricing_response.text)
 
         session_ids = re.search(r'semester_id[^0-9]*([0-9]+)', pricing_response.text, flags=0)
         print(session_ids)
