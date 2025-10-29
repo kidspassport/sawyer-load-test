@@ -3,10 +3,18 @@ import random
 
 user_pool = [
     {
-        "email": f"locust_{i:02d}@hisawyer.com",
+        "email": "locust01@hisawyer.com",
+        "password": "password123",
+        "requires_2fa": True,
+        "totp_secret": "MZGXM32KOU2HA4KNIQZUCNCBNJYE6UBV",
+    }
+] + [
+    {
+        "email": f"locust{i:02d}@hisawyer.com",
+        "requires_2fa": False,
         "password": "password123",
     }
-    for i in range(1, 101)
+    for i in range(2, 5)
 ]
 
 user_queue: Queue = Queue()

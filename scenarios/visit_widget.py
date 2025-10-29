@@ -6,6 +6,8 @@ import random
 import time
 from urllib.parse import urlencode
 
+from utils.auth import extract_csrf_token, login
+
 
 class VisitWidgetScenario(SequentialTaskSet):
     def on_start(self):
@@ -13,6 +15,10 @@ class VisitWidgetScenario(SequentialTaskSet):
 
     @task
     def visit_widget(self):
+        time.sleep(random.uniform(1, 10))
+        user = self.user.user # ... why is this needed again?
+        csrf_token = login(self.client, user)
+
         now = datetime.now()
         html_headers = {"Accept": "text/html"}
         json_headers = {"Accept": "application/json"}
