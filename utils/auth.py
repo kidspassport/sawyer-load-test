@@ -14,6 +14,93 @@ def extract_csrf_token(html):
     return None
 
 
+def login(client, user, require_2fa=False, totp_secret=None):
+    """
+    Args:
+        client: Locust HttpSession client
+        user (dict): User credentials with 'email' and 'password'
+        require_2fa (bool): Whether user has 2FA enabled
+        totp_secret (str): Shared 2FA secret for all load test users
+
+    Returns:
+        str: CSRF token for subsequent requests
+    """
+    print(f"{user['email']} logging in")
+
+    # Step 1: GET login page to extract CSRF token
+    response = client.get("/auth/log-in")
+    csrf_token = extract_csrf_token(response.text)
+    if not csrf_token:
+        raise Exception("CSRF token not found on sign-in page")
+
+    # Step 2: Submit login credentials
+    # Production uses JSON format with nested member object
+    payload = {
+        "member": {
+            "email": user["email"],
+            "password": user["password"]
+        },
+        "source_url": response.url  # Use the actual login page URL
+    }
+
+    headers = {
+        "Content-Type": "application/json",
+        "X-CSRF-Token": csrf_token
+    }
+
+    # First request - initial login
+    login_response = client.post(
+        "/api/v1/marketplace/auth/log-in",
+        json=payload,
+        headers=headers,
+        catch_response=True,
+        allow_redirects=False
+    )
+
+    # Always make the second smees request regardless of first response
+    print(f"✓ Making second login request to /api/v1/marketplace/smees/log_in")
+    smees_payload = {"auth_smee_source": "standalone"}
+
+    smees_response = client.post(
+        "/api/v1/marketplace/smees/log_in",
+        json=smees_payload,
+        headers=headers,
+        catch_response=True,
+        allow_redirects=False
+    )
+
+    # Save the first login response for 2FA (it has the Keycloak URL)
+    login_response_first = login_response
+
+    # Use smees response to check overall login success
+    login_response = smees_response
+
+    if login_response.status_code not in [200, 301, 302, 303]:
+        raise Exception(f"{user['email']} login failed with status {login_response.status_code}")
+
+    print(f"Initial login successful for {user['email']}")
+
+    # Step 3: Handle 2FA if required
+    if user["requires_2fa"]:
+        if not user["totp_secret"]:
+            raise Exception("2FA required but no secret provided")
+
+        print(f"✓ 2FA is required, completing 2FA flow...")
+
+        # The actual 2FA redirect is in the first login response JSON, not smees response
+        # Pass the first login_response (before smees) to complete_2fa_flow
+        success = complete_2fa_flow(client, user["totp_secret"], login_response_first)
+
+        if not success:
+            raise Exception("2FA authentication failed")
+
+        print(f"✓ Successfully logged in with 2FA for {user['email']}")
+    else:
+        print(f"✓ Login complete (no 2FA) for {user['email']}")
+
+    return csrf_token
+
+
 def generate_2fa_code(secret):
     """
     Generate 2FA code from authenticator secret
@@ -154,126 +241,3 @@ def complete_2fa_flow(client, secret, login_response):
         return False
 
 
-
-# def login(client, user):
-#     # response = client.post(
-#     #     "/load-test-login",
-#     #     data={"email": user["email"]}
-#     # )
-#     # if response.status_code != 200:
-#     #     raise Exception(f"Load test login failed for {user['email']}: {response.status_code}") #TODO this boots the user from the test.  sleep and retry instead
-
-#     # print(f"Logged in {user["email"]}")
-#     # return True
-
-
-#     # # GET login page to extract CSRF
-
-#     print(f"{user["email"]} logging in with password {user["password"]}")
-#     response = client.get("/auth/log-in")
-#     csrf_token = extract_csrf_token(response.text)
-#     if not csrf_token:
-#         raise Exception("CSRF token not found on sign-in page")
-
-#     payload = {
-#         "authenticity_token": csrf_token,
-#         "member[email]": user["email"],
-#         "member[password]": user["password"],
-#         "session[member][email]": user["email"],
-#         "session[member][password]": user["password"]
-#     }
-
-#     headers = {"Content-Type": "application/x-www-form-urlencoded"}
-
-#     login_response = client.post("/api/v1/marketplace/auth/log-in", data=payload, headers=headers)
-#     # print(login_response.text)
-#     if login_response.status_code not in [200, 302]:
-#         raise Exception(f"Login failed with status {login_response.status_code}")
-
-#     return csrf_token
-
-def login(client, user, require_2fa=False, totp_secret=None):
-    """
-    Args:
-        client: Locust HttpSession client
-        user (dict): User credentials with 'email' and 'password'
-        require_2fa (bool): Whether user has 2FA enabled
-        totp_secret (str): Shared 2FA secret for all load test users
-
-    Returns:
-        str: CSRF token for subsequent requests
-    """
-    print(f"{user['email']} logging in")
-
-    # Step 1: GET login page to extract CSRF token
-    response = client.get("/auth/log-in")
-    csrf_token = extract_csrf_token(response.text)
-    if not csrf_token:
-        raise Exception("CSRF token not found on sign-in page")
-
-    # Step 2: Submit login credentials
-    # Production uses JSON format with nested member object
-    payload = {
-        "member": {
-            "email": user["email"],
-            "password": user["password"]
-        },
-        "source_url": response.url  # Use the actual login page URL
-    }
-
-    headers = {
-        "Content-Type": "application/json",
-        "X-CSRF-Token": csrf_token
-    }
-
-    # First request - initial login
-    login_response = client.post(
-        "/api/v1/marketplace/auth/log-in",
-        json=payload,
-        headers=headers,
-        catch_response=True,
-        allow_redirects=False
-    )
-
-    # Always make the second smees request regardless of first response
-    print(f"✓ Making second login request to /api/v1/marketplace/smees/log_in")
-    smees_payload = {"auth_smee_source": "standalone"}
-
-    smees_response = client.post(
-        "/api/v1/marketplace/smees/log_in",
-        json=smees_payload,
-        headers=headers,
-        catch_response=True,
-        allow_redirects=False
-    )
-
-    # Save the first login response for 2FA (it has the Keycloak URL)
-    login_response_first = login_response
-
-    # Use smees response to check overall login success
-    login_response = smees_response
-
-    if login_response.status_code not in [200, 301, 302, 303]:
-        raise Exception(f"{user['email']} login failed with status {login_response.status_code}")
-
-    print(f"Initial login successful for {user['email']}")
-
-    # Step 3: Handle 2FA if required
-    if user["requires_2fa"]:
-        if not user["totp_secret"]:
-            raise Exception("2FA required but no secret provided")
-
-        print(f"✓ 2FA is required, completing 2FA flow...")
-
-        # The actual 2FA redirect is in the first login response JSON, not smees response
-        # Pass the first login_response (before smees) to complete_2fa_flow
-        success = complete_2fa_flow(client, user["totp_secret"], login_response_first)
-
-        if not success:
-            raise Exception("2FA authentication failed")
-
-        print(f"✓ Successfully logged in with 2FA for {user['email']}")
-    else:
-        print(f"✓ Login complete (no 2FA) for {user['email']}")
-
-    return csrf_token
