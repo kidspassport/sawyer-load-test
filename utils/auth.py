@@ -34,7 +34,6 @@ def login(client, user, require_2fa=False, totp_secret=None):
         raise Exception("CSRF token not found on sign-in page")
 
     # Step 2: Submit login credentials
-    # Production uses JSON format with nested member object
     payload = {
         "member": {
             "email": user["email"],
@@ -58,7 +57,7 @@ def login(client, user, require_2fa=False, totp_secret=None):
     )
 
     # Always make the second smees request regardless of first response
-    print(f"✓ Making second login request to /api/v1/marketplace/smees/log_in")
+    print(f"Making second login request to /api/v1/marketplace/smees/log_in")
     smees_payload = {"auth_smee_source": "standalone"}
 
     smees_response = client.post(
@@ -85,18 +84,16 @@ def login(client, user, require_2fa=False, totp_secret=None):
         if not user["totp_secret"]:
             raise Exception("2FA required but no secret provided")
 
-        print(f"✓ 2FA is required, completing 2FA flow...")
+        print(f"2FA is required, completing 2FA flow...")
 
-        # The actual 2FA redirect is in the first login response JSON, not smees response
-        # Pass the first login_response (before smees) to complete_2fa_flow
         success = complete_2fa_flow(client, user["totp_secret"], login_response_first)
 
         if not success:
             raise Exception("2FA authentication failed")
 
-        print(f"✓ Successfully logged in with 2FA for {user['email']}")
+        print(f"Successfully logged in with 2FA for {user['email']}")
     else:
-        print(f"✓ Login complete (no 2FA) for {user['email']}")
+        print(f"Login complete (no 2FA) for {user['email']}")
 
     return csrf_token
 
@@ -131,14 +128,12 @@ def complete_2fa_flow(client, secret, login_response):
     Returns:
         bool: True if 2FA completed successfully
     """
-    # Generate the code (same as Playwright's generate2FACode)
     code = generate_2fa_code(secret)
 
     # Follow the redirect from login to get the 2FA page
-    # The login response should redirect to the 2FA page if 2FA is enabled
     if login_response.status_code in [302, 303]:
         redirect_url = login_response.headers.get('Location', '')
-        print(f"✓ Following redirect to 2FA page: {redirect_url}")
+        print(f"Following redirect to 2FA page: {redirect_url}")
 
         twofa_page_response = client.get(
             redirect_url,
@@ -150,54 +145,51 @@ def complete_2fa_flow(client, secret, login_response):
         twofa_page_response = login_response
 
     if twofa_page_response.status_code != 200:
-        print(f"✗ 2FA page not accessible: {twofa_page_response.status_code}")
-        # Don't try to call .failure() since response might not have catch_response=True
+        print(f"❌ 2FA page not accessible: {twofa_page_response.status_code}")
         return False
 
-    print(f"✓ 2FA page loaded, extracting form action URL")
+    print(f"2FA page loaded, extracting form action URL")
 
     # Check if response is JSON (Keycloak redirect)
     try:
         json_data = twofa_page_response.json()
         if 'location' in json_data:
             keycloak_url = json_data['location']
-            print(f"✓ Found Keycloak redirect URL in JSON response")
-            print(f"✓ Following Keycloak redirect: {keycloak_url[:100]}...")
+            print(f"Found Keycloak redirect URL in JSON response")
+            print(f"Following Keycloak redirect: {keycloak_url[:100]}...")
 
             # Follow the Keycloak redirect to get the actual 2FA form
-            # Keycloak may redirect multiple times, so follow them
             keycloak_response = client.get(
                 keycloak_url,
                 catch_response=True,
-                allow_redirects=True  # Allow automatic redirect following
+                allow_redirects=True
             )
 
             if keycloak_response.status_code != 200:
-                print(f"✗ Keycloak 2FA page not accessible: {keycloak_response.status_code}")
+                print(f"❌ Keycloak 2FA page not accessible: {keycloak_response.status_code}")
                 return False
 
-            # Now use this response for form extraction
             twofa_page_response = keycloak_response
-            print(f"✓ Keycloak 2FA page loaded")
+            print(f"Keycloak 2FA page loaded")
     except (json.JSONDecodeError, ValueError):
-        print(f"✓ Response is HTML, proceeding with form extraction")
+        print(f"Response is HTML, proceeding with form extraction")
 
     # Extract the form action URL from the 2FA page HTML
     soup = BeautifulSoup(twofa_page_response.text, 'html.parser')
     form = soup.find('form')
 
     if not form:
-        print("✗ 2FA form not found in page")
+        print("❌ 2FA form not found in page")
         print(f"DEBUG: Response status: {twofa_page_response.status_code}")
         print(f"DEBUG: Response body (1st 1000): {twofa_page_response.text[:1000]}")
         return False
 
     action_url = form.get('action')
     if not action_url:
-        print("✗ Form action URL not found")
+        print("❌ Form action URL not found")
         return False
 
-    print(f"✓ Found form action URL: {action_url}")
+    print(f"Found form action URL: {action_url}")
 
     payload = {
         "otp": code,
@@ -207,37 +199,33 @@ def complete_2fa_flow(client, secret, login_response):
 
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
 
-    # Submit to the actual form action URL
     twofa_submit_response = client.post(
-        action_url,  # Dynamic URL from the form
+        action_url,
         data=payload,
         headers=headers,
         catch_response=True,
         allow_redirects=False  # Check redirect to confirm success
     )
 
-    # Check for successful 2FA (usually redirects or returns 200)
     if twofa_submit_response.status_code in [200, 302, 303]:
-        print(f"✓ 2FA verification successful")
+        print(f"2FA verification successful")
 
-        # Follow the redirect chain back to the app to complete OAuth and set session
         if twofa_submit_response.status_code in [302, 303]:
             callback_url = twofa_submit_response.headers.get('Location', '')
-            print(f"✓ Following OAuth callback redirect: {callback_url[:100]}...")
+            print(f"Following OAuth callback redirect: {callback_url[:100]}...")
 
-            # Follow all redirects to complete the OAuth flow and get session cookie
             callback_response = client.get(
                 callback_url,
                 catch_response=True,
-                allow_redirects=True  # Follow entire redirect chain
+                allow_redirects=True
             )
 
-            print(f"✓ OAuth callback completed, final URL: {callback_response.url}")
-            print(f"✓ Session cookies set: {bool(client.cookies)}")
+            print(f"OAuth callback completed, final URL: {callback_response.url}")
+            print(f"Session cookies set: {bool(client.cookies)}")
 
         return True
     else:
-        print(f"✗ 2FA verification failed: {twofa_submit_response.status_code}")
+        print(f"❌ 2FA verification failed: {twofa_submit_response.status_code}")
         return False
 
 
