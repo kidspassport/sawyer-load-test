@@ -59,7 +59,7 @@ class PlaceOrderScenario(SequentialTaskSet):
 
         # Get session and member IDs from JS-injected HTML
         pricing_response = self.client.get(
-            f"/{self.slug}/schedules/activity-set/{asg_id}/drop-in/{drop_in_config_id}/?source=semesters",
+            f"/{self.slug}/schedules/activity-set/{asg_id}/free-drop-in/{drop_in_config_id}/?source=semesters",
             headers={
                 "Authorization": f"Bearer {jwt}",
                 "Accept": JS_ACCEPT_HEADER,
@@ -144,25 +144,25 @@ class PlaceOrderScenario(SequentialTaskSet):
         time.sleep(random.uniform(1, 10))
 
         # Place the order
-        # place_order_response = self.client.post(
-        #     f"/{self.slug}/schedules/checkout/place_order",
-        #     data={
-        #         "authenticity_token": self.csrf_token,
-        #         "view": "",
-        #         "booking_fee_id": self.booking_fee_id,
-        #         f"provider_form_responses[{provider_id}][id]": "",
-        #         f"provider_form_responses[{provider_id}][response]": "true",
-        #         "provider_fee_ids": "",
-        #         "one_off_payment_method_type": "",
-        #         "button": "place-order",
-        #         "slug": f"{self.slug}"
-        #     },
-        #     headers={
-        #         "Content-Type": FORM_HEADER,
-        #         "X-Requested-With": "XMLHttpRequest",
-        #         "Accept": "text/javascript"
-        #     }
-        # )
+        place_order_response = self.client.post(
+            f"/{self.slug}/schedules/checkout/place_order",
+            data={
+                "authenticity_token": self.csrf_token,
+                "view": "",
+                "booking_fee_id": self.booking_fee_id,
+                f"provider_form_responses[{provider_id}][id]": "",
+                f"provider_form_responses[{provider_id}][response]": "true",
+                "provider_fee_ids": "",
+                "one_off_payment_method_type": "",
+                "button": "place-order",
+                "slug": f"{self.slug}"
+            },
+            headers={
+                "Content-Type": FORM_HEADER,
+                "X-Requested-With": "XMLHttpRequest",
+                "Accept": "text/javascript"
+            }
+        )
         print(f"{user['email']} 'placed' an order")
 
         time.sleep(random.uniform(1, 10))
@@ -173,7 +173,11 @@ class PlaceOrderScenario(SequentialTaskSet):
             headers={"Accept": API_ACCEPT_HEADER}
         )
         data = json.loads(response.text)
-        return [activity["id"] for activity in data.get("data", {}).get("results", [])]
+
+        try:
+            return [activity["id"] for activity in data.get("data", {}).get("results", [])]
+        except AttributeError:
+            return []
 
     def _get_jwt_and_props(self, pdp_html):
         soup = BeautifulSoup(pdp_html, "html.parser")
