@@ -1,4 +1,3 @@
-# Standard library imports
 import os
 import html
 import json
@@ -6,21 +5,15 @@ import random
 import re
 import time
 from urllib.parse import urlparse, parse_qs
-
-# Third-party imports
 from locust import SequentialTaskSet, task
 from bs4 import BeautifulSoup
 
-# Local imports
 from utils.auth import extract_csrf_token, login
 
-# Constants
 API_ACCEPT_HEADER = "application/json"
 HTML_ACCEPT_HEADER = "text/html"
 JS_ACCEPT_HEADER = "text/javascript, application/javascript, application/ecmascript, application/x-ecmascript"
 FORM_HEADER = "application/x-www-form-urlencoded"
-
-# BOOKING_FEE_ID = 306 # TODO does not work on prod
 
 class PlaceOrderScenario(SequentialTaskSet):
     """Scenario for simulating add-to-cart and checkout flow in Locust load test."""
@@ -64,7 +57,7 @@ class PlaceOrderScenario(SequentialTaskSet):
 
         time.sleep(random.uniform(1, 10))
 
-        # Get session and child IDs from JS-injected HTML
+        # Get session and member IDs from JS-injected HTML
         pricing_response = self.client.get(
             f"/{self.slug}/schedules/activity-set/{asg_id}/free-drop-in/{drop_in_config_id}/?source=semesters",
             headers={
@@ -73,16 +66,16 @@ class PlaceOrderScenario(SequentialTaskSet):
                 "X-Requested-With": "XMLHttpRequest"
             }
         )
-
         session_ids = re.findall(r'data-item=\\"(\d+)\\"', pricing_response.text)
-        child_ids = re.findall(r'children_(\d{4,8})', pricing_response.text)
 
-        if not session_ids or not child_ids:
-            print("No session or child IDs found.")
+        member_id_match = re.search(r'member_id=(\d+)', pricing_response.text)
+        member_id = member_id_match.group(1) if member_id_match else None
+
+        if not session_ids:
+            print("No session IDs found.")
             return
 
         session_id = random.choice(session_ids)
-        child_id = random.choice(child_ids)
 
         time.sleep(random.uniform(1, 10))
 
@@ -91,13 +84,13 @@ class PlaceOrderScenario(SequentialTaskSet):
             "/cart/item/subtotal",
             data={
                 "authenticity_token": csrf_token,
-                "item_type": "provider_free_dropin",
+                "item_type": "provider_dropin",
                 "activity_session_group_id": asg_id,
                 "semester_id": session_id,
                 "session_ids[]": session_id,
                 "view": "",
                 "add_to_cart_source": "widget",
-                "participants[]": f"children_{child_id}",
+                "participants[]": f"adult_{member_id}",
                 "button": "add-to-cart"
             },
             headers={
@@ -170,7 +163,7 @@ class PlaceOrderScenario(SequentialTaskSet):
                 "Accept": "text/javascript"
             }
         )
-        print(f"{user['email']} placed an order")
+        print(f"{user['email']} 'placed' an order")
 
         time.sleep(random.uniform(1, 10))
 
@@ -180,7 +173,11 @@ class PlaceOrderScenario(SequentialTaskSet):
             headers={"Accept": API_ACCEPT_HEADER}
         )
         data = json.loads(response.text)
-        return [activity["id"] for activity in data.get("data", {}).get("results", [])]
+
+        try:
+            return [activity["id"] for activity in data.get("data", {}).get("results", [])]
+        except AttributeError:
+            return []
 
     def _get_jwt_and_props(self, pdp_html):
         soup = BeautifulSoup(pdp_html, "html.parser")
