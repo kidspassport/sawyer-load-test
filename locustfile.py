@@ -9,7 +9,7 @@ class RailsUser(HttpUser):
     wait_time = between(1, 3)
 
     def on_start(self):
-        if self.host and "www.hisawyer.com" in self.host:
+        if self.host and any(domain in self.host for domain in ["www.hisawyer.com", "fir.hisawyer.com"]):
             users_module = importlib.import_module("utils.users_prod")
         elif self.host and "staging.hisawyer.com" in self.host:
             users_module = importlib.import_module("utils.users_staging")

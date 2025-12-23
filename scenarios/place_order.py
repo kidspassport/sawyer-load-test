@@ -84,7 +84,7 @@ class PlaceOrderScenario(SequentialTaskSet):
             "/cart/item/subtotal",
             data={
                 "authenticity_token": csrf_token,
-                "item_type": "provider_dropin",
+                "item_type": "provider_free_dropin",
                 "activity_session_group_id": asg_id,
                 "semester_id": session_id,
                 "session_ids[]": session_id,
@@ -163,7 +163,7 @@ class PlaceOrderScenario(SequentialTaskSet):
                 "Accept": "text/javascript"
             }
         )
-        print(f"{user['email']} 'placed' an order")
+        print(f"{user['email']} placed an order")
 
         time.sleep(random.uniform(1, 10))
 
