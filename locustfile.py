@@ -1,5 +1,6 @@
 from locust import HttpUser, between, events
 from scenarios.visit_widget import VisitWidgetScenario
+from scenarios.browse_widget import BrowseWidgetScenario
 from scenarios.place_order import PlaceOrderScenario
 from utils.auth import login
 import os
@@ -16,22 +17,6 @@ class RailsUser(HttpUser):
         else:
             users_module = importlib.import_module("utils.users")
 
-        # Set realistic browser headers
-        # self.client.headers.update({
-        #     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        #     'Accept': 'application/json, text/plain, */*',
-        #     'Accept-Language': 'en-US,en;q=0.9',
-        #     'Accept-Encoding': 'gzip, deflate, br',
-        #     'Referer': 'https://www.hisawyer.com/',
-        #     'Origin': 'https://www.hisawyer.com',
-        #     'Sec-Fetch-Dest': 'empty',
-        #     'Sec-Fetch-Mode': 'cors',
-        #     'Sec-Fetch-Site': 'same-origin',
-        #     'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-        #     'sec-ch-ua-mobile': '?0',
-        #     'sec-ch-ua-platform': '"macOS"'
-        # })
-
         self.user = users_module.get_random_user()
 
         scenario = self.environment.parsed_options.scenario
@@ -39,6 +24,8 @@ class RailsUser(HttpUser):
             self.tasks = ['view_explore']
         elif scenario == "visit_widget":
             self.tasks = [VisitWidgetScenario]
+        elif scenario == "browse_widget":
+            self.tasks = [BrowseWidgetScenario]
         elif scenario == "place_order":
             self.tasks = [PlaceOrderScenario]
         elif scenario == "rush":
@@ -51,6 +38,6 @@ class RailsUser(HttpUser):
 @events.init_command_line_parser.add_listener
 def custom_args(parser):
     parser.add_argument("--scenario", choices=["place_order",
-                        "visit_widget", "rush"], default="place_order", help="Scenario")
+                        "visit_widget", "rush", "browse_widget"], default="place_order", help="Scenario")
     parser.add_argument("--slug", is_required=True, default="pretend-school")
-    parser.add_argument("--booking_fee_id", is_required=True, default="306")
+    parser.add_argument("--booking_fee_id", is_required=True, default="154") # use 306 for production
