@@ -37,6 +37,11 @@ PRICING_FLOWS = {
         'endpoint_template': '/{slug}/schedules/activity-set/{asg_id}/semester/{config_id}/',
         'item_type': 'provider_semester',
     },
+    'monthly': {
+        'html_type': 'monthly',
+        'endpoint_template': '/{slug}/schedules/activity-set/{asg_id}/monthly/{config_id}/',
+        'item_type': 'provider_semester_subscription',
+    },
     # 'camp': {
     #     'html_type': 'camp',
     #     'endpoint_template': '/{slug}/schedules/activity-set/{asg_id}/camp/{config_id}/',
@@ -124,16 +129,30 @@ class PlaceOrderScenario(SequentialTaskSet):
                 "X-Requested-With": "XMLHttpRequest"
             }
         )
-        session_ids = re.findall(r'data-item=\\"(\d+)\\"', pricing_response.text)
 
         member_id_match = re.search(r'member_id=(\d+)', pricing_response.text)
         member_id = member_id_match.group(1) if member_id_match else None
 
-        if not session_ids:
-            print("No session IDs found.")
-            return
+        # For drop-in flows, we need to select specific sessions from the calendar
+        # For semester/monthly flows, we just use the semester_id (activity_session.id)
+        is_drop_in_flow = flow_type in ['drop_in', 'free_drop_in']
 
-        session_id = random.choice(session_ids)
+        if is_drop_in_flow:
+            session_ids = re.findall(r'data-item=\\"(\d+)\\"', pricing_response.text)
+            if not session_ids:
+                print(f"No session IDs found for {flow_type}.")
+                return
+            session_id = random.choice(session_ids)
+        else:
+            # For semester/monthly, extract semester_id from hidden field
+            semester_id_match = re.search(r'name=\\"semester_id\\"[^>]*value=\\"(\d+)\\"', pricing_response.text)
+            if not semester_id_match:
+                # Try alternate pattern
+                semester_id_match = re.search(r'value=\\"(\d+)\\"[^>]*name=\\"semester_id\\"', pricing_response.text)
+            if not semester_id_match:
+                print(f"No semester_id found for {flow_type}.")
+                return
+            session_id = semester_id_match.group(1)
 
         time.sleep(random.uniform(1, 10))
 
@@ -141,6 +160,7 @@ class PlaceOrderScenario(SequentialTaskSet):
         cart_data = self._build_cart_data(
             csrf_token=csrf_token,
             flow_info=flow_info,
+            flow_type=flow_type,
             asg_id=asg_id,
             session_id=session_id,
             member_id=member_id
@@ -266,28 +286,27 @@ class PlaceOrderScenario(SequentialTaskSet):
 
         return random.choice(available_configs)
 
-    def _build_cart_data(self, csrf_token, flow_info, asg_id, session_id, member_id):
+    def _build_cart_data(self, csrf_token, flow_info, flow_type, asg_id, session_id, member_id):
         """Build cart POST data based on the pricing flow type.
 
-        Override specific fields per flow_type if needed.
+        Drop-in flows need session_ids[], semester/monthly flows don't.
         """
-        # Base cart data common to most flows
+        is_drop_in_flow = flow_type in ['drop_in', 'free_drop_in']
+
         data = {
             "authenticity_token": csrf_token,
             "item_type": flow_info['item_type'],
             "activity_session_group_id": asg_id,
             "semester_id": session_id,
-            "session_ids[]": session_id,
             "view": "",
             "add_to_cart_source": "widget",
             "participants[]": f"adult_{member_id}",
             "button": "add-to-cart"
         }
 
-        # Add flow-specific overrides here as needed
-        # Example:
-        # if 'extra_fields' in flow_info:
-        #     data.update(flow_info['extra_fields'])
+        # Only drop-in flows need session_ids[]
+        if is_drop_in_flow:
+            data["session_ids[]"] = session_id
 
         return data
 
