@@ -1,5 +1,4 @@
 import os
-import html
 import json
 import random
 import re
@@ -14,6 +13,36 @@ API_ACCEPT_HEADER = "application/json"
 HTML_ACCEPT_HEADER = "text/html"
 JS_ACCEPT_HEADER = "text/javascript, application/javascript, application/ecmascript, application/x-ecmascript"
 FORM_HEADER = "application/x-www-form-urlencoded"
+
+# Supported pricing flows - easy to expand by adding new entries
+# Each flow defines:
+#   - html_type: the data-pricing-configuration-type attribute value (from HTML DOM)
+#   - endpoint_template: URL pattern for the pricing flow
+#   - item_type: value for cart POST
+# Note: Order matters! More specific patterns should come first (e.g., 'free_drop_in' before 'drop_in')
+PRICING_FLOWS = {
+    'free_drop_in': {
+        'html_type': 'free-drop-in',
+        'endpoint_template': '/{slug}/schedules/activity-set/{asg_id}/free-drop-in/{config_id}/',
+        'item_type': 'provider_free_dropin',
+    },
+    'drop_in': {
+        'html_type': 'drop-in',
+        'endpoint_template': '/{slug}/schedules/activity-set/{asg_id}/drop-in/{config_id}/',
+        'item_type': 'provider_dropin',
+    },
+    # Add more pricing types here as needed:
+    'semester': {
+        'html_type': 'semester',
+        'endpoint_template': '/{slug}/schedules/activity-set/{asg_id}/semester/{config_id}/',
+        'item_type': 'provider_semester',
+    },
+    # 'camp': {
+    #     'html_type': 'camp',
+    #     'endpoint_template': '/{slug}/schedules/activity-set/{asg_id}/camp/{config_id}/',
+    #     'item_type': 'provider_camp',
+    # },
+}
 
 class PlaceOrderScenario(SequentialTaskSet):
     """Scenario for simulating add-to-cart and checkout flow in Locust load test."""
@@ -39,27 +68,56 @@ class PlaceOrderScenario(SequentialTaskSet):
 
         time.sleep(random.uniform(1, 10))
 
-        # Visit PDP for activity
+        # Visit PDP for activity (gets JWT, but pricing options are loaded async)
         pdp_response = self.client.get(f"/{self.slug}/schedules/activity-set/{asg_id}?source=semesters")
         csrf_token = extract_csrf_token(pdp_response.text)
-        jwt, props_dict = self._get_jwt_and_props(pdp_response.text)
+        soup = BeautifulSoup(pdp_response.text, "html.parser")
+        jwt = self._get_jwt(soup)
 
-        if not jwt or not props_dict:
-            print("JWT or React props not found on PDP page.")
+        if not jwt:
+            print("JWT not found on PDP page.")
             return
 
-        pricing_configs = props_dict.get("staticData", {}).get("pricing", {}).get("pricing_configurations", [])
-        drop_in_config = self._find_drop_in_config(pricing_configs)
-        if not drop_in_config:
-            print("Drop In pricing configuration not found in PDP response.")
+        time.sleep(random.uniform(1, 10))
+
+        # Fetch pricing options HTML (this is loaded async by React in the browser)
+        # The endpoint returns JS that injects HTML via jQuery: $(".product_detail_new").html("...");
+        pricing_js_response = self.client.get(
+            f"/{self.slug}/schedules/product-detail-pricing/{asg_id}.js",
+            headers={
+                "Accept": JS_ACCEPT_HEADER,
+                "X-Requested-With": "XMLHttpRequest"
+            }
+        )
+        # Extract HTML from jQuery call: $(".product_detail_new").html("...");
+        html_match = re.search(r'\.html\("(.*)"\);', pricing_js_response.text, re.DOTALL)
+        if not html_match:
+            print("Could not extract pricing HTML from JS response")
             return
-        drop_in_config_id = drop_in_config["id"]
+        # Unescape the JS string (handles \" and other escapes)
+        pricing_html = html_match.group(1).encode().decode('unicode_escape')
+        pricing_soup = BeautifulSoup(pricing_html, "html.parser")
+
+        # Find pricing config from the pricing HTML
+        pricing_config, flow_type, flow_info = self._find_pricing_config_from_html(pricing_soup)
+
+        if not pricing_config:
+            # Log available pricing types for debugging
+            available_types = [el.get('data-pricing-configuration-type')
+                               for el in pricing_soup.find_all(attrs={'data-pricing-configuration-type': True})]
+            print(f"No supported pricing configuration found. Available in HTML: {available_types}")
+            return
+        config_id = pricing_config["id"]
+        print(f"Using pricing type '{flow_type}' (config id: {config_id})")
 
         time.sleep(random.uniform(1, 10))
 
         # Get session and member IDs from JS-injected HTML
+        endpoint = flow_info['endpoint_template'].format(
+            slug=self.slug, asg_id=asg_id, config_id=config_id
+        )
         pricing_response = self.client.get(
-            f"/{self.slug}/schedules/activity-set/{asg_id}/free-drop-in/{drop_in_config_id}/?source=semesters",
+            f"{endpoint}?source=semesters",
             headers={
                 "Authorization": f"Bearer {jwt}",
                 "Accept": JS_ACCEPT_HEADER,
@@ -80,19 +138,16 @@ class PlaceOrderScenario(SequentialTaskSet):
         time.sleep(random.uniform(1, 10))
 
         # Add to cart
+        cart_data = self._build_cart_data(
+            csrf_token=csrf_token,
+            flow_info=flow_info,
+            asg_id=asg_id,
+            session_id=session_id,
+            member_id=member_id
+        )
         add_to_cart_response = self.client.post(
             "/cart/item/subtotal",
-            data={
-                "authenticity_token": csrf_token,
-                "item_type": "provider_free_dropin",
-                "activity_session_group_id": asg_id,
-                "semester_id": session_id,
-                "session_ids[]": session_id,
-                "view": "",
-                "add_to_cart_source": "widget",
-                "participants[]": f"adult_{member_id}",
-                "button": "add-to-cart"
-            },
+            data=cart_data,
             headers={
                 "Content-Type": FORM_HEADER,
                 "X-Requested-With": "XMLHttpRequest",
@@ -179,20 +234,62 @@ class PlaceOrderScenario(SequentialTaskSet):
         except AttributeError:
             return []
 
-    def _get_jwt_and_props(self, pdp_html):
-        soup = BeautifulSoup(pdp_html, "html.parser")
+    def _get_jwt(self, soup):
+        """Extract JWT from the page meta tag."""
         jwt_meta = soup.find("meta", attrs={"name": "api-jwt"})
-        react_div = soup.find("div", {"data-react-class": "marketplace/product_detail/app"})
-        jwt = jwt_meta["content"] if jwt_meta and jwt_meta.has_attr("content") else None
-        props_dict = None
-        if react_div and react_div.has_attr("data-react-props"):
-            raw_props = react_div["data-react-props"]
-            json_props = html.unescape(raw_props)
-            props_dict = json.loads(json_props)
-        return jwt, props_dict
+        return jwt_meta["content"] if jwt_meta and jwt_meta.has_attr("content") else None
 
-    def _find_drop_in_config(self, pricing_configs):
-        return next((cfg for cfg in pricing_configs if "drop in" in cfg.get("name", "").lower()), None)
+    def _find_pricing_config_from_html(self, soup):
+        """Find a supported pricing config from HTML DOM elements, chosen randomly.
+
+        Collects all matching pricing configs and randomly selects one,
+        so different runs can exercise different pricing flows.
+
+        Returns: (config_dict, flow_type, flow_info) or (None, None, None)
+        """
+        available_configs = []
+
+        for flow_type, flow_info in PRICING_FLOWS.items():
+            html_type = flow_info.get('html_type')
+            if not html_type:
+                continue
+
+            element = soup.find(attrs={'data-pricing-configuration-type': html_type})
+            if element:
+                config_id = element.get('data-pricing-configuration-id')
+                if config_id:
+                    config = {'id': int(config_id)}
+                    available_configs.append((config, flow_type, flow_info))
+
+        if not available_configs:
+            return None, None, None
+
+        return random.choice(available_configs)
+
+    def _build_cart_data(self, csrf_token, flow_info, asg_id, session_id, member_id):
+        """Build cart POST data based on the pricing flow type.
+
+        Override specific fields per flow_type if needed.
+        """
+        # Base cart data common to most flows
+        data = {
+            "authenticity_token": csrf_token,
+            "item_type": flow_info['item_type'],
+            "activity_session_group_id": asg_id,
+            "semester_id": session_id,
+            "session_ids[]": session_id,
+            "view": "",
+            "add_to_cart_source": "widget",
+            "participants[]": f"adult_{member_id}",
+            "button": "add-to-cart"
+        }
+
+        # Add flow-specific overrides here as needed
+        # Example:
+        # if 'extra_fields' in flow_info:
+        #     data.update(flow_info['extra_fields'])
+
+        return data
 
     def _get_provider_id(self, soup):
         link = soup.find('a', href=lambda href: href and 'referer_id=' in href)
