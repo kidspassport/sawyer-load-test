@@ -8,6 +8,7 @@ from locust import SequentialTaskSet, task
 from bs4 import BeautifulSoup
 
 from utils.auth import extract_csrf_token, login
+from utils.users import get_random_user
 
 API_ACCEPT_HEADER = "application/json"
 HTML_ACCEPT_HEADER = "text/html"
@@ -58,7 +59,8 @@ class PlaceOrderScenario(SequentialTaskSet):
 
     @task
     def add_to_cart(self):
-        user = self.user.user
+        # Get a fresh random user for each task run
+        user = get_random_user()
         time.sleep(random.uniform(1, 10))
         csrf_token = login(self.client, user)
 
@@ -163,7 +165,8 @@ class PlaceOrderScenario(SequentialTaskSet):
             flow_type=flow_type,
             asg_id=asg_id,
             session_id=session_id,
-            member_id=member_id
+            member_id=member_id,
+            config_id=config_id
         )
         add_to_cart_response = self.client.post(
             "/cart/item/subtotal",
@@ -286,7 +289,7 @@ class PlaceOrderScenario(SequentialTaskSet):
 
         return random.choice(available_configs)
 
-    def _build_cart_data(self, csrf_token, flow_info, flow_type, asg_id, session_id, member_id):
+    def _build_cart_data(self, csrf_token, flow_info, flow_type, asg_id, session_id, member_id, config_id):
         """Build cart POST data based on the pricing flow type.
 
         Drop-in flows need session_ids[], semester/monthly flows don't.
@@ -298,6 +301,7 @@ class PlaceOrderScenario(SequentialTaskSet):
             "item_type": flow_info['item_type'],
             "activity_session_group_id": asg_id,
             "semester_id": session_id,
+            "pricing_configuration_id": config_id,
             "view": "",
             "add_to_cart_source": "widget",
             "participants[]": f"adult_{member_id}",
