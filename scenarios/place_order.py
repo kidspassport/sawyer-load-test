@@ -48,11 +48,11 @@ PRICING_FLOWS = {
         'endpoint_template': '/{slug}/schedules/activity-set/{asg_id}/monthly/{config_id}/',
         'item_type': 'provider_semester_subscription',
     },
-    # 'camp': {
-    #     'html_type': 'camp',
-    #     'endpoint_template': '/{slug}/schedules/activity-set/{asg_id}/camp/{config_id}/',
-    #     'item_type': 'provider_camp',
-    # },
+    'camp': {
+        'html_type': 'camp',
+        'endpoint_template': '/{slug}/schedules/activity-set/{asg_id}/camp/{config_id}/',
+        'item_type': 'provider_camp',
+    },
 }
 
 class PlaceOrderScenario(SequentialTaskSet):
@@ -259,10 +259,32 @@ class PlaceOrderScenario(SequentialTaskSet):
         time.sleep(random.uniform(1, 10))
 
     def _get_activity_ids(self):
-        response = self.client.get(
-            f"/api/v1/widget/scheduled_activities?slug={self.slug}&page=1",
-            headers={"Accept": API_ACCEPT_HEADER}
-        )
+        """Get activity IDs, randomly trying camps first then falling back to semesters."""
+        # Randomly decide whether to try camps first (50% chance)
+        try_camps_first = random.choice([True, False])
+
+        if try_camps_first:
+            # Try camps first
+            camp_ids = self._fetch_activity_ids(schedule_id='camps')
+            if camp_ids:
+                print('Using camps schedule')
+                return camp_ids
+            # Fall back to semesters if no camps
+            print('No camps found, falling back to semesters')
+
+        return self._fetch_activity_ids(schedule_id=None)
+
+    def _fetch_activity_ids(self, schedule_id=None):
+        """Fetch activity IDs from the API.
+
+        Args:
+            schedule_id: Optional schedule filter (e.g., 'camps' for camp activities)
+        """
+        url = f"/api/v1/widget/scheduled_activities?slug={self.slug}&page=1"
+        if schedule_id:
+            url = f"/api/v1/widget/scheduled_activities?schedule_id={schedule_id}&slug={self.slug}&page=1"
+
+        response = self.client.get(url, headers={"Accept": API_ACCEPT_HEADER})
         data = json.loads(response.text)
 
         try:
