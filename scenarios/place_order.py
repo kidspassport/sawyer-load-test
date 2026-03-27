@@ -33,6 +33,11 @@ PRICING_FLOWS = {
         'item_type': 'provider_dropin',
     },
     # Add more pricing types here as needed:
+    'free_semester': {
+        'html_type': 'free-semester',
+        'endpoint_template': '/{slug}/schedules/activity-set/{asg_id}/free-semester/{config_id}/',
+        'item_type': 'provider_free_semester',
+    },
     'semester': {
         'html_type': 'semester',
         'endpoint_template': '/{slug}/schedules/activity-set/{asg_id}/semester/{config_id}/',
