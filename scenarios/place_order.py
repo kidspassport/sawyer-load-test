@@ -53,6 +53,11 @@ PRICING_FLOWS = {
         'endpoint_template': '/{slug}/schedules/activity-set/{asg_id}/camp/{config_id}/',
         'item_type': 'provider_camp',
     },
+    'camp_weekly': {
+        'html_type': 'camp-weekly',
+        'endpoint_template': '/{slug}/schedules/activity-set/{asg_id}/camp-weekly/{config_id}/',
+        'item_type': 'provider_weekly',
+    },
 }
 
 class PlaceOrderScenario(SequentialTaskSet):
@@ -141,8 +146,10 @@ class PlaceOrderScenario(SequentialTaskSet):
         member_id = member_id_match.group(1) if member_id_match else None
 
         # For drop-in flows, we need to select specific sessions from the calendar
-        # For semester/monthly flows, we just use the semester_id (activity_session.id)
+        # For camp-weekly, we select all sessions from a random week
+        # For semester/monthly/camp flows, we just use the semester_id (activity_session.id)
         is_drop_in_flow = flow_type in ['drop_in', 'free_drop_in']
+        is_weekly_flow = flow_type in ['camp_weekly']
 
         if is_drop_in_flow:
             session_ids = re.findall(r'data-item=\\"(\d+)\\"', pricing_response.text)
@@ -150,6 +157,13 @@ class PlaceOrderScenario(SequentialTaskSet):
                 print(f"No session IDs found for {flow_type}.")
                 return
             session_id = random.choice(session_ids)
+        elif is_weekly_flow:
+            # For camp-weekly, group sessions by week and select all from a random week
+            session_ids = self._get_weekly_session_ids(pricing_response.text)
+            if not session_ids:
+                print(f"No weekly session IDs found for {flow_type}.")
+                return
+            session_id = session_ids  # This is a list of all sessions in the week
         else:
             # For semester/monthly, extract semester_id from hidden field
             semester_id_match = re.search(r'name=\\"semester_id\\"[^>]*value=\\"(\d+)\\"', pricing_response.text)
@@ -292,6 +306,40 @@ class PlaceOrderScenario(SequentialTaskSet):
         except AttributeError:
             return []
 
+    def _get_weekly_session_ids(self, pricing_response_text):
+        """Extract session IDs grouped by week and return all sessions from a random week.
+
+        For camp-weekly, sessions are grouped by data-week-num-year (e.g., '2026-22').
+        Each day in the week has a data-item with the session ID.
+        Returns a list of all session IDs for the selected week.
+        """
+        # Find all week-session pairs: data-week-num-year="2026-22" ... data-item="509629"
+        # Pattern matches: data-item="ID" data-week-num="N" data-week-num-year="YYYY-WW"
+        week_sessions = re.findall(
+            r'data-item=\\"(\d+)\\"[^>]*data-week-num-year=\\"([^"\\]+)\\"',
+            pricing_response_text
+        )
+
+        if not week_sessions:
+            return None
+
+        # Group sessions by week
+        weeks = {}
+        for session_id, week_year in week_sessions:
+            if session_id:  # Skip empty data-item values
+                if week_year not in weeks:
+                    weeks[week_year] = []
+                weeks[week_year].append(session_id)
+
+        if not weeks:
+            return None
+
+        # Select a random week
+        selected_week = random.choice(list(weeks.keys()))
+        selected_sessions = weeks[selected_week]
+        print(f"Selected week {selected_week} with {len(selected_sessions)} sessions")
+        return selected_sessions
+
     def _get_jwt(self, soup):
         """Extract JWT from the page meta tag."""
         jwt_meta = soup.find("meta", attrs={"name": "api-jwt"})
@@ -394,14 +442,16 @@ class PlaceOrderScenario(SequentialTaskSet):
         """Build cart POST data based on the pricing flow type.
 
         Drop-in flows need session_ids[], semester/monthly flows don't.
+        Weekly flows need session_ids[] with all sessions from the selected week.
         """
         is_drop_in_flow = flow_type in ['drop_in', 'free_drop_in']
+        is_weekly_flow = flow_type in ['camp_weekly']
 
         data = {
             "authenticity_token": csrf_token,
             "item_type": flow_info['item_type'],
             "activity_session_group_id": asg_id,
-            "semester_id": session_id,
+            "semester_id": session_id if not isinstance(session_id, list) else session_id[0],
             "pricing_configuration_id": config_id,
             "view": "",
             "add_to_cart_source": "widget",
@@ -409,8 +459,12 @@ class PlaceOrderScenario(SequentialTaskSet):
             "button": "add-to-cart"
         }
 
-        # Only drop-in flows need session_ids[]
+        # Drop-in flows need a single session_ids[]
         if is_drop_in_flow:
+            data["session_ids[]"] = session_id
+
+        # Weekly flows need all session_ids[] from the selected week
+        if is_weekly_flow and isinstance(session_id, list):
             data["session_ids[]"] = session_id
 
         # Add payment plan if selected (for semester flows)
