@@ -164,6 +164,9 @@ class PlaceOrderScenario(SequentialTaskSet):
         # Check for payment plan options (available for semester flows)
         payment_plan_id = self._get_random_payment_plan(pricing_response.text, flow_type)
 
+        # Check for add-ons and randomly select some
+        addons = self._get_random_addons(pricing_response.text)
+
         time.sleep(random.uniform(1, 10))
 
         # Add to cart
@@ -175,7 +178,8 @@ class PlaceOrderScenario(SequentialTaskSet):
             session_id=session_id,
             member_id=member_id,
             config_id=config_id,
-            payment_plan_id=payment_plan_id
+            payment_plan_id=payment_plan_id,
+            addons=addons
         )
         add_to_cart_response = self.client.post(
             "/cart/item/subtotal",
@@ -319,7 +323,52 @@ class PlaceOrderScenario(SequentialTaskSet):
             print(f"Using payment plan: {selected_plan}")
         return selected_plan
 
-    def _build_cart_data(self, csrf_token, flow_info, flow_type, asg_id, session_id, member_id, config_id, payment_plan_id=None):
+    def _get_random_addons(self, pricing_response_text):
+        """Extract available add-ons and randomly select some.
+
+        Returns a dict with:
+          - extended_day: True/False (whether to include extended day)
+          - extended_day_selection_style: 'full' or other value from hidden field
+          - optional_addon_ids: list of selected optional addon IDs
+        """
+        addons = {
+            'extended_day': False,
+            'extended_day_selection_style': None,
+            'optional_addon_ids': []
+        }
+
+        # Check for extended day add-on
+        # Look for: data-addons-type="extended_day" or name="extended_day[status]"
+        if 'extended_day[status]' in pricing_response_text:
+            # Randomly decide to include extended day (50% chance)
+            if random.choice([True, False]):
+                addons['extended_day'] = True
+                # Extract selection style (usually 'full')
+                style_match = re.search(r'name=\\"extended_day\[selection_style\]\\"[^>]*value=\\"([^\\"]+)\\"', pricing_response_text)
+                if style_match:
+                    addons['extended_day_selection_style'] = style_match.group(1)
+                else:
+                    addons['extended_day_selection_style'] = 'full'
+                print('Adding extended day add-on')
+
+        # Check for optional add-ons
+        # Look for: name="optional_addons[]" value="38090"
+        optional_addon_ids = re.findall(r'name=\\"optional_addons\[\]\\"[^>]*value=\\"(\d+)\\"', pricing_response_text)
+        if not optional_addon_ids:
+            # Try alternate pattern where value comes before name
+            optional_addon_ids = re.findall(r'value=\\"(\d+)\\"[^>]*name=\\"optional_addons\[\]\\"', pricing_response_text)
+
+        if optional_addon_ids:
+            # Randomly select some optional add-ons (each has 50% chance)
+            for addon_id in optional_addon_ids:
+                if random.choice([True, False]):
+                    addons['optional_addon_ids'].append(addon_id)
+            if addons['optional_addon_ids']:
+                print(f"Adding optional add-ons: {addons['optional_addon_ids']}")
+
+        return addons
+
+    def _build_cart_data(self, csrf_token, flow_info, flow_type, asg_id, session_id, member_id, config_id, payment_plan_id=None, addons=None):
         """Build cart POST data based on the pricing flow type.
 
         Drop-in flows need session_ids[], semester/monthly flows don't.
@@ -346,6 +395,22 @@ class PlaceOrderScenario(SequentialTaskSet):
         if payment_plan_id:
             data["payment_plan_v2_enabled"] = "true"
             data["payment_plan_id_v2"] = payment_plan_id
+
+        # Add add-ons if selected
+        if addons:
+            if addons.get('extended_day'):
+                data["extended_day[status]"] = "1"
+                if addons.get('extended_day_selection_style'):
+                    data["extended_day[selection_style]"] = addons['extended_day_selection_style']
+            for addon_id in addons.get('optional_addon_ids', []):
+                # Multiple optional_addons[] values need special handling
+                if "optional_addons[]" not in data:
+                    data["optional_addons[]"] = addon_id
+                else:
+                    # For multiple values, we need to convert to a list
+                    if not isinstance(data["optional_addons[]"], list):
+                        data["optional_addons[]"] = [data["optional_addons[]"]]
+                    data["optional_addons[]"].append(addon_id)
 
         return data
 
