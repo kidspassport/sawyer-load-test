@@ -156,6 +156,9 @@ class PlaceOrderScenario(SequentialTaskSet):
                 return
             session_id = semester_id_match.group(1)
 
+        # Check for payment plan options (available for semester flows)
+        payment_plan_id = self._get_random_payment_plan(pricing_response.text, flow_type)
+
         time.sleep(random.uniform(1, 10))
 
         # Add to cart
@@ -166,7 +169,8 @@ class PlaceOrderScenario(SequentialTaskSet):
             asg_id=asg_id,
             session_id=session_id,
             member_id=member_id,
-            config_id=config_id
+            config_id=config_id,
+            payment_plan_id=payment_plan_id
         )
         add_to_cart_response = self.client.post(
             "/cart/item/subtotal",
@@ -289,7 +293,28 @@ class PlaceOrderScenario(SequentialTaskSet):
 
         return random.choice(available_configs)
 
-    def _build_cart_data(self, csrf_token, flow_info, flow_type, asg_id, session_id, member_id, config_id):
+    def _get_random_payment_plan(self, pricing_response_text, flow_type):
+        """Extract payment plan options and randomly select one.
+
+        Payment plans are available for semester flows. Returns 'full' or a plan ID.
+        Returns None for non-semester flows or if no payment plans available.
+        """
+        # Only semester flows have payment plans
+        if flow_type not in ['semester']:
+            return None
+
+        # Look for payment plan radio options: value="full" or value="9189" (plan ID)
+        plan_values = re.findall(r'data-name=\\"selectItempayment_plan_id_v2\\"\s+value=\\"([^\\"]+)\\"', pricing_response_text)
+
+        if not plan_values:
+            return None
+
+        selected_plan = random.choice(plan_values)
+        if selected_plan != 'full':
+            print(f"Using payment plan: {selected_plan}")
+        return selected_plan
+
+    def _build_cart_data(self, csrf_token, flow_info, flow_type, asg_id, session_id, member_id, config_id, payment_plan_id=None):
         """Build cart POST data based on the pricing flow type.
 
         Drop-in flows need session_ids[], semester/monthly flows don't.
@@ -311,6 +336,11 @@ class PlaceOrderScenario(SequentialTaskSet):
         # Only drop-in flows need session_ids[]
         if is_drop_in_flow:
             data["session_ids[]"] = session_id
+
+        # Add payment plan if selected (for semester flows)
+        if payment_plan_id:
+            data["payment_plan_v2_enabled"] = "true"
+            data["payment_plan_id_v2"] = payment_plan_id
 
         return data
 
