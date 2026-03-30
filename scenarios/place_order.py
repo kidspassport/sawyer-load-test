@@ -15,12 +15,11 @@ HTML_ACCEPT_HEADER = "text/html"
 JS_ACCEPT_HEADER = "text/javascript, application/javascript, application/ecmascript, application/x-ecmascript"
 FORM_HEADER = "application/x-www-form-urlencoded"
 
-# Supported pricing flows - easy to expand by adding new entries
 # Each flow defines:
 #   - html_type: the data-pricing-configuration-type attribute value (from HTML DOM)
 #   - endpoint_template: URL pattern for the pricing flow
 #   - item_type: value for cart POST
-# Note: Order matters! More specific patterns should come first (e.g., 'free_drop_in' before 'drop_in')
+# Note: Order matters – More specific patterns should come first (e.g., 'free_drop_in' before 'drop_in')
 PRICING_FLOWS = {
     'free_drop_in': {
         'html_type': 'free-drop-in',
@@ -32,7 +31,6 @@ PRICING_FLOWS = {
         'endpoint_template': '/{slug}/schedules/activity-set/{asg_id}/drop-in/{config_id}/',
         'item_type': 'provider_dropin',
     },
-    # Add more pricing types here as needed:
     'free_semester': {
         'html_type': 'free-semester',
         'endpoint_template': '/{slug}/schedules/activity-set/{asg_id}/free-semester/{config_id}/',
@@ -69,14 +67,12 @@ class PlaceOrderScenario(SequentialTaskSet):
 
     @task
     def add_to_cart(self):
-        # Get a fresh random user for each task run
         user = get_random_user()
         time.sleep(random.uniform(1, 10))
         csrf_token = login(self.client, user)
 
         time.sleep(random.uniform(1, 10))
 
-        # Get a valid ASG ID
         activity_ids = self._get_activity_ids()
         if not activity_ids:
             print("No activity IDs found.")
@@ -85,7 +81,6 @@ class PlaceOrderScenario(SequentialTaskSet):
 
         time.sleep(random.uniform(1, 10))
 
-        # Visit PDP for activity (gets JWT, but pricing options are loaded async)
         pdp_response = self.client.get(f"/{self.slug}/schedules/activity-set/{asg_id}?source=semesters")
         csrf_token = extract_csrf_token(pdp_response.text)
         soup = BeautifulSoup(pdp_response.text, "html.parser")
@@ -97,8 +92,6 @@ class PlaceOrderScenario(SequentialTaskSet):
 
         time.sleep(random.uniform(1, 10))
 
-        # Fetch pricing options HTML (this is loaded async by React in the browser)
-        # The endpoint returns JS that injects HTML via jQuery: $(".product_detail_new").html("...");
         pricing_js_response = self.client.get(
             f"/{self.slug}/schedules/product-detail-pricing/{asg_id}.js",
             headers={
@@ -106,20 +99,18 @@ class PlaceOrderScenario(SequentialTaskSet):
                 "X-Requested-With": "XMLHttpRequest"
             }
         )
-        # Extract HTML from jQuery call: $(".product_detail_new").html("...");
+
         html_match = re.search(r'\.html\("(.*)"\);', pricing_js_response.text, re.DOTALL)
         if not html_match:
             print("Could not extract pricing HTML from JS response")
             return
-        # Unescape the JS string (handles \" and other escapes)
+
         pricing_html = html_match.group(1).encode().decode('unicode_escape')
         pricing_soup = BeautifulSoup(pricing_html, "html.parser")
 
-        # Find pricing config from the pricing HTML
         pricing_config, flow_type, flow_info = self._find_pricing_config_from_html(pricing_soup)
 
         if not pricing_config:
-            # Log available pricing types for debugging
             available_types = [el.get('data-pricing-configuration-type')
                                for el in pricing_soup.find_all(attrs={'data-pricing-configuration-type': True})]
             print(f"No supported pricing configuration found. Available in HTML: {available_types}")
@@ -129,7 +120,6 @@ class PlaceOrderScenario(SequentialTaskSet):
 
         time.sleep(random.uniform(1, 10))
 
-        # Get session and member IDs from JS-injected HTML
         endpoint = flow_info['endpoint_template'].format(
             slug=self.slug, asg_id=asg_id, config_id=config_id
         )
@@ -145,9 +135,9 @@ class PlaceOrderScenario(SequentialTaskSet):
         member_id_match = re.search(r'member_id=(\d+)', pricing_response.text)
         member_id = member_id_match.group(1) if member_id_match else None
 
-        # For drop-in flows, we need to select specific sessions from the calendar
-        # For camp-weekly, we select all sessions from a random week
-        # For semester/monthly/camp flows, we just use the semester_id (activity_session.id)
+        # For drop-in flows, select specific sessions from the calendar
+        # For camp-weekly, select all sessions from a random week
+        # For semester/monthly/camp flows, just use the semester_id (activity_session.id)
         is_drop_in_flow = flow_type in ['drop_in', 'free_drop_in']
         is_weekly_flow = flow_type in ['camp_weekly']
 
@@ -168,17 +158,13 @@ class PlaceOrderScenario(SequentialTaskSet):
             # For semester/monthly, extract semester_id from hidden field
             semester_id_match = re.search(r'name=\\"semester_id\\"[^>]*value=\\"(\d+)\\"', pricing_response.text)
             if not semester_id_match:
-                # Try alternate pattern
                 semester_id_match = re.search(r'value=\\"(\d+)\\"[^>]*name=\\"semester_id\\"', pricing_response.text)
             if not semester_id_match:
                 print(f"No semester_id found for {flow_type}.")
                 return
             session_id = semester_id_match.group(1)
 
-        # Check for payment plan options (available for semester flows)
         payment_plan_id = self._get_random_payment_plan(pricing_response.text, flow_type)
-
-        # Check for add-ons and randomly select some
         addons = self._get_random_addons(pricing_response.text)
 
         time.sleep(random.uniform(1, 10))
@@ -274,16 +260,13 @@ class PlaceOrderScenario(SequentialTaskSet):
 
     def _get_activity_ids(self):
         """Get activity IDs, randomly trying camps first then falling back to semesters."""
-        # Randomly decide whether to try camps first (50% chance)
         try_camps_first = random.choice([True, False])
 
         if try_camps_first:
-            # Try camps first
             camp_ids = self._fetch_activity_ids(schedule_id='camps')
             if camp_ids:
                 print('Using camps schedule')
                 return camp_ids
-            # Fall back to semesters if no camps
             print('No camps found, falling back to semesters')
 
         return self._fetch_activity_ids(schedule_id=None)
@@ -334,7 +317,6 @@ class PlaceOrderScenario(SequentialTaskSet):
         if not weeks:
             return None
 
-        # Select a random week
         selected_week = random.choice(list(weeks.keys()))
         selected_sessions = weeks[selected_week]
         print(f"Selected week {selected_week} with {len(selected_sessions)} sessions")
@@ -378,7 +360,7 @@ class PlaceOrderScenario(SequentialTaskSet):
         Payment plans are available for semester flows. Returns 'full' or a plan ID.
         Returns None for non-semester flows or if no payment plans available.
         """
-        # Only semester flows have payment plans
+
         if flow_type not in ['semester']:
             return None
 
@@ -410,7 +392,6 @@ class PlaceOrderScenario(SequentialTaskSet):
         # Check for extended day add-on
         # Look for: data-addons-type="extended_day" or name="extended_day[status]"
         if 'extended_day[status]' in pricing_response_text:
-            # Randomly decide to include extended day (50% chance)
             if random.choice([True, False]):
                 addons['extended_day'] = True
                 # Extract selection style (usually 'full')
