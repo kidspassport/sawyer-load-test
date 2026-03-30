@@ -199,14 +199,14 @@ class PlaceOrderScenario(SequentialTaskSet):
             headers={"Accept": HTML_ACCEPT_HEADER}
         )
 
-        time.sleep(random.uniform(1, 10))
+        time.sleep(random.uniform(10, 15))
 
         self.client.get(
             f"/{self.slug}/schedules/precheckout/steps/next",
             headers={"Accept": HTML_ACCEPT_HEADER}
         )
 
-        time.sleep(random.uniform(1, 10))
+        time.sleep(random.uniform(10, 15))
 
         # Checkout
         checkout_response = self.client.get(
@@ -256,7 +256,7 @@ class PlaceOrderScenario(SequentialTaskSet):
         )
         print(f"{user['email']} placed an order")
 
-        time.sleep(random.uniform(1, 10))
+        time.sleep(random.uniform(10, 15))
 
     def _get_activity_ids(self):
         """Get activity IDs, randomly trying camps first then falling back to semesters."""
