@@ -378,29 +378,41 @@ class PlaceOrderScenario(SequentialTaskSet):
     def _get_random_addons(self, pricing_response_text):
         """Extract available add-ons and randomly select some.
 
+        Note: Extended day and early drop-off add-ons only use 'full' selection style
+        (applies to entire camp/semester).
+
         Returns a dict with:
           - extended_day: True/False (whether to include extended day)
-          - extended_day_selection_style: 'full' or other value from hidden field
+          - extended_day_selection_style: always 'full' (entire camp/semester)
+          - early_drop_off: True/False (whether to include early drop-off)
+          - early_drop_off_selection_style: always 'full' (entire camp/semester)
           - optional_addon_ids: list of selected optional addon IDs
         """
         addons = {
             'extended_day': False,
             'extended_day_selection_style': None,
+            'early_drop_off': False,
+            'early_drop_off_selection_style': None,
             'optional_addon_ids': []
         }
 
         # Check for extended day add-on
-        # Look for: data-addons-type="extended_day" or name="extended_day[status]"
+        # Note: Only 'full' selection style is supported (entire camp/semester).
+        # Specific day/week selection is not implemented.
         if 'extended_day[status]' in pricing_response_text:
             if random.choice([True, False]):
                 addons['extended_day'] = True
-                # Extract selection style (usually 'full')
-                style_match = re.search(r'name=\\"extended_day\[selection_style\]\\"[^>]*value=\\"([^\\"]+)\\"', pricing_response_text)
-                if style_match:
-                    addons['extended_day_selection_style'] = style_match.group(1)
-                else:
-                    addons['extended_day_selection_style'] = 'full'
-                print('Adding extended day add-on')
+                addons['extended_day_selection_style'] = 'full'
+                print('Adding extended day add-on (full camp/semester)')
+
+        # Check for early drop-off add-on
+        # Note: Only 'full' selection style is supported (entire camp/semester).
+        # Specific day/week selection is not implemented.
+        if 'early_drop_off[status]' in pricing_response_text:
+            if random.choice([True, False]):
+                addons['early_drop_off'] = True
+                addons['early_drop_off_selection_style'] = 'full'
+                print('Adding early drop-off add-on (full camp/semester)')
 
         # Check for optional add-ons
         # Look for: name="optional_addons[]" value="38090"
@@ -459,6 +471,10 @@ class PlaceOrderScenario(SequentialTaskSet):
                 data["extended_day[status]"] = "1"
                 if addons.get('extended_day_selection_style'):
                     data["extended_day[selection_style]"] = addons['extended_day_selection_style']
+            if addons.get('early_drop_off'):
+                data["early_drop_off[status]"] = "1"
+                if addons.get('early_drop_off_selection_style'):
+                    data["early_drop_off[selection_style]"] = addons['early_drop_off_selection_style']
             for addon_id in addons.get('optional_addon_ids', []):
                 # Multiple optional_addons[] values need special handling
                 if "optional_addons[]" not in data:
