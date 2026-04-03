@@ -166,6 +166,7 @@ class PlaceOrderScenario(SequentialTaskSet):
 
         payment_plan_id = self._get_random_payment_plan(pricing_response.text, flow_type)
         addons = self._get_random_addons(pricing_response.text)
+        child_id = self._get_random_child(pricing_response.text)
 
         time.sleep(random.uniform(1, 10))
 
@@ -179,7 +180,8 @@ class PlaceOrderScenario(SequentialTaskSet):
             member_id=member_id,
             config_id=config_id,
             payment_plan_id=payment_plan_id,
-            addons=addons
+            addons=addons,
+            child_id=child_id
         )
         add_to_cart_response = self.client.post(
             "/cart/item/subtotal",
@@ -431,7 +433,24 @@ class PlaceOrderScenario(SequentialTaskSet):
 
         return addons
 
-    def _build_cart_data(self, csrf_token, flow_info, flow_type, asg_id, session_id, member_id, config_id, payment_plan_id=None, addons=None):
+    def _get_random_child(self, pricing_response_text):
+        """Extract available children from pricing response and randomly select one.
+
+        Children appear as: <option value="children_36879">Baby Locust 3 (9 yrs)</option>
+        Returns the child ID (e.g., '36879') or None if no children available.
+        """
+        # Look for children options in the participants selector
+        # Pattern matches: value="children_12345" or value=\"children_12345\"
+        child_ids = re.findall(r'value=\\?"children_(\d+)\\?"', pricing_response_text)
+
+        if not child_ids:
+            return None
+
+        selected_child = random.choice(child_ids)
+        print(f"Selected child: {selected_child}")
+        return selected_child
+
+    def _build_cart_data(self, csrf_token, flow_info, flow_type, asg_id, session_id, member_id, config_id, payment_plan_id=None, addons=None, child_id=None):
         """Build cart POST data based on the pricing flow type.
 
         Drop-in flows need session_ids[], semester/monthly flows don't.
@@ -439,6 +458,12 @@ class PlaceOrderScenario(SequentialTaskSet):
         """
         is_drop_in_flow = flow_type in ['drop_in', 'free_drop_in']
         is_weekly_flow = flow_type in ['camp_weekly']
+
+        # Use child if available, otherwise fall back to adult member
+        if child_id:
+            participant = f"children_{child_id}"
+        else:
+            participant = f"adult_{member_id}"
 
         data = {
             "authenticity_token": csrf_token,
@@ -448,7 +473,7 @@ class PlaceOrderScenario(SequentialTaskSet):
             "pricing_configuration_id": config_id,
             "view": "",
             "add_to_cart_source": "widget",
-            "participants[]": f"adult_{member_id}",
+            "participants[]": participant,
             "button": "add-to-cart"
         }
 
