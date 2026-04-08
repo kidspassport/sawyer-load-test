@@ -6,6 +6,26 @@ set -e
 echo "🚀 Launching Locust Swarm on EC2..."
 echo ""
 
+# Load environment variables from .env file
+if [ -f .env ]; then
+  export $(cat .env | grep -v '^#' | xargs)
+  echo "✓ Loaded environment variables from .env"
+else
+  echo "⚠️  No .env file found. Create one from .env.example"
+  echo "   Copy .env.example to .env and set LOAD_TEST_TOKEN"
+  exit 1
+fi
+
+# Validate that LOAD_TEST_TOKEN is set
+if [ -z "$LOAD_TEST_TOKEN" ]; then
+  echo "❌ LOAD_TEST_TOKEN not set in .env file"
+  echo "   Generate a token with: python3 -c \"import secrets; print(secrets.token_urlsafe(32))\""
+  exit 1
+fi
+
+echo "✓ Load test token configured"
+echo ""
+
 # Configuration
 WORKER_COUNT=3
 INSTANCE_TYPE="t3.medium"
@@ -35,6 +55,13 @@ WORKER_SG=$(aws ec2 describe-security-groups \
   --output text)
 echo "   Worker SG: $WORKER_SG"
 
+# Create master user-data with load test token
+echo ""
+echo "📝 Creating master configuration with load test token..."
+cat > /tmp/master-user-data.sh <<EOF
+$(cat swarm_scripts/master_setup.sh | sed "s/\${load_test_token}/$LOAD_TEST_TOKEN/g")
+EOF
+
 # Launch master instance
 echo ""
 echo "🎯 Launching master instance..."
@@ -43,7 +70,7 @@ MASTER_INSTANCE=$(aws ec2 run-instances \
   --instance-type $INSTANCE_TYPE \
   --key-name $KEY_NAME \
   --security-group-ids $MASTER_SG \
-  --user-data file://swarm_scripts/master_setup.sh \
+  --user-data file:///tmp/master-user-data.sh \
   --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=locust-master},{Key=Role,Value=master}]' \
   --query 'Instances[0].InstanceId' \
   --output text)
@@ -67,11 +94,11 @@ MASTER_PUBLIC_IP=$(aws ec2 describe-instances \
 echo "   Master Private IP: $MASTER_PRIVATE_IP"
 echo "   Master Public IP: $MASTER_PUBLIC_IP"
 
-# Create worker user-data with master IP
+# Create worker user-data with master IP and load test token
 echo ""
 echo "📝 Creating worker configuration..."
 cat > /tmp/worker-user-data.sh <<EOF
-$(cat swarm_scripts/worker_setup.sh | sed "s/\${master_ip}/$MASTER_PRIVATE_IP/g")
+$(cat swarm_scripts/worker_setup.sh | sed "s/\${master_ip}/$MASTER_PRIVATE_IP/g" | sed "s/\${load_test_token}/$LOAD_TEST_TOKEN/g")
 EOF
 
 # Launch worker instances

@@ -43,7 +43,8 @@ User=locust
 WorkingDirectory=/home/locust/sawyer-load-test
 Environment="PATH=/usr/local/bin:/usr/bin:/bin"
 Environment="PYTHONUNBUFFERED=1"
-ExecStart=/usr/local/bin/locust \
+Environment="LOAD_TEST_TOKEN=\${load_test_token}"
+ExecStart=/usr/local/bin/locust \\
   --worker \
   --master-host=$MASTER_IP \
   --master-port=5557 \
