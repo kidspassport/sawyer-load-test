@@ -16,7 +16,19 @@ cd /home/locust
 git clone https://github.com/kidspassport/sawyer-load-test.git
 cd sawyer-load-test
 
-# Install Python dependencies
+# Remove problematic system packages that conflict with pip
+apt-get remove -y python3-blinker python3-zope.interface python3-urllib3 python3-requests || true
+
+# Install Python dependencies - upgrade pip first
+pip3 install --upgrade pip setuptools wheel
+
+# Force install gevent and its dependencies first
+pip3 install --force-reinstall --no-cache-dir zope.event zope.interface greenlet gevent
+
+# Force reinstall urllib3 and requests to ensure correct versions
+pip3 install --force-reinstall --no-cache-dir urllib3 requests
+
+# Now install other requirements
 pip3 install -r requirements.txt
 
 # Create systemd service for worker
@@ -30,6 +42,7 @@ Type=simple
 User=locust
 WorkingDirectory=/home/locust/sawyer-load-test
 Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
 ExecStart=/usr/local/bin/locust \
   --worker \
   --master-host=$MASTER_IP \
