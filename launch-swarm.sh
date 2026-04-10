@@ -31,6 +31,25 @@ WORKER_COUNT=3
 INSTANCE_TYPE="t3.medium"
 KEY_NAME="locust-key"
 
+# Check if AWS CLI is installed
+if ! command -v aws &> /dev/null; then
+  echo "❌ AWS CLI is not installed"
+  echo "   Install it with: brew install awscli (macOS) or pip install awscli"
+  echo "   See: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
+  exit 1
+fi
+
+# Check if AWS credentials are configured
+if ! aws sts get-caller-identity &> /dev/null; then
+  echo "❌ AWS credentials not configured"
+  echo "   Run: aws configure"
+  echo "   You'll need your AWS Access Key ID and Secret Access Key"
+  exit 1
+fi
+
+echo "✓ AWS CLI configured"
+echo ""
+
 # Get latest Ubuntu 22.04 AMI
 echo "📦 Finding latest Ubuntu 22.04 AMI..."
 AMI_ID=$(aws ec2 describe-images \
