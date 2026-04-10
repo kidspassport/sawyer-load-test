@@ -1,0 +1,168 @@
+name: Launch Load Test Swarm
+
+on:
+  workflow_dispatch:
+    inputs:
+      workers:
+        description: 'Number of workers'
+        required: true
+        default: '3'
+        type: choice
+        options: ['1', '2', '3', '5', '10']
+      instance_type:
+        description: 'EC2 instance type'
+        required: true
+        default: 't3.medium'
+        type: choice
+        options: ['t3.small', 't3.medium', 't3.large', 't3.xlarge']
+      max_duration_hours:
+        description: 'Max runtime (hours) - auto-terminates after this'
+        required: true
+        default: '2'
+        type: number
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options: ['staging', 'production']
+
+jobs:
+  launch-swarm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300  # 5 hour max workflow timeout
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for existing swarms
+        id: check_existing
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          # Check if there are already running Locust instances
+          EXISTING=$(aws ec2 describe-instances \
+            --filters "Name=tag:Role,Values=master,worker" "Name=instance-state-name,Values=running,pending" \
+            --query 'Reservations[].Instances[].InstanceId' \
+            --output text)
+
+          if [ -n "$EXISTING" ]; then
+            echo "⚠️  Found existing Locust instances: $EXISTING"
+            echo "   Terminate them first or wait for auto-termination"
+            exit 1
+          fi
+          echo "✓ No existing swarms found"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Create .env file
+        run: |
+          echo "LOAD_TEST_TOKEN=${{ secrets.LOAD_TEST_TOKEN }}" > .env
+          echo "✓ Created .env file with token"
+
+      - name: Update launch script configuration
+        run: |
+          # Temporarily update worker count and instance type in launch script
+          sed -i "s/WORKER_COUNT=3/WORKER_COUNT=${{ inputs.workers }}/" launch-swarm.sh
+          sed -i "s/INSTANCE_TYPE=\"t3.medium\"/INSTANCE_TYPE=\"${{ inputs.instance_type }}\"/" launch-swarm.sh
+          echo "✓ Updated launch script with worker count: ${{ inputs.workers }}, instance type: ${{ inputs.instance_type }}"
+
+      - name: Launch EC2 swarm
+        id: launch
+        run: |
+          # Make script executable
+          chmod +x launch-swarm.sh
+
+          # Launch the swarm
+          ./launch-swarm.sh | tee launch-output.txt
+
+          # Extract instance IDs and IPs from output
+          MASTER_IP=$(grep "Master Public IP:" launch-output.txt | awk '{print $NF}')
+
+          echo "master_ip=$MASTER_IP" >> $GITHUB_OUTPUT
+          echo "launch_time=$(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_OUTPUT
+
+      - name: Display swarm information
+        run: |
+          echo "## 🚀 Load Test Swarm Launched!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Configuration:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Workers: ${{ inputs.workers }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Instance Type: ${{ inputs.instance_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Environment: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Max Duration: ${{ inputs.max_duration_hours }} hours" >> $GITHUB_STEP_SUMMARY
+          echo "- Launch Time: ${{ steps.launch.outputs.launch_time }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Access:**" >> $GITHUB_STEP_SUMMARY
+          echo "- 🌐 Web UI: http://${{ steps.launch.outputs.master_ip }}:8089" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Setup Progress:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Wait 3-5 minutes for instances to configure" >> $GITHUB_STEP_SUMMARY
+          echo "- Workers will auto-connect to master" >> $GITHUB_STEP_SUMMARY
+          echo "- Check worker count in top-right of Web UI" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Auto-Termination:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Swarm will auto-terminate in ${{ inputs.max_duration_hours }} hour(s)" >> $GITHUB_STEP_SUMMARY
+          echo "- Or manually terminate with: \`./terminate-swarm.sh\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "Monitor this workflow to see when auto-termination occurs." >> $GITHUB_STEP_SUMMARY
+
+      - name: Wait for setup to complete
+        run: |
+          echo "⏳ Waiting 5 minutes for instances to configure..."
+          sleep 300
+          echo "✓ Initial setup should be complete"
+
+      - name: Verify swarm is healthy
+        run: |
+          MASTER_IP="${{ steps.launch.outputs.master_ip }}"
+
+          # Try to reach the web UI
+          echo "Checking if Locust Web UI is accessible..."
+          if curl -s -o /dev/null -w "%{http_code}" "http://$MASTER_IP:8089" | grep -q "200"; then
+            echo "✓ Web UI is accessible at http://$MASTER_IP:8089"
+          else
+            echo "⚠️  Web UI not yet accessible. May need more time to start."
+            echo "   Check Web UI manually in a few minutes."
+          fi
+
+      - name: Monitor and auto-terminate
+        run: |
+          DURATION_SECONDS=$((3600 * ${{ inputs.max_duration_hours }}))
+
+          echo "⏰ Swarm will run for ${{ inputs.max_duration_hours }} hour(s)"
+          echo "   Started at: ${{ steps.launch.outputs.launch_time }}"
+          echo "   Will terminate at: $(date -u -d "+${{ inputs.max_duration_hours }} hours" +"%Y-%m-%d %H:%M:%S UTC" 2>/dev/null || date -u -v+${{ inputs.max_duration_hours }}H +"%Y-%m-%d %H:%M:%S UTC")"
+
+          # Sleep for the duration
+          sleep $DURATION_SECONDS
+
+          echo "⏰ Max duration reached. Terminating swarm..."
+
+      - name: Terminate swarm
+        if: always()  # Always run cleanup, even if previous steps fail
+        run: |
+          chmod +x terminate-swarm.sh
+          ./terminate-swarm.sh || echo "⚠️  Termination may have failed. Check AWS console."
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "## ✅ Swarm Terminated" >> $GITHUB_STEP_SUMMARY
+          echo "Terminated at: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload launch logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: launch-logs
+          path: launch-output.txt
+          retention-days: 7
