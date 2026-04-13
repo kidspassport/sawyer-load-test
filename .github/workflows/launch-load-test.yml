@@ -184,6 +184,9 @@ jobs:
             echo "✓ Orders will NOT be placed (safe mode)"
           fi
 
+          echo "✓ Updated launch script and setup scripts with configuration"
+
+      - name: Launch EC2 swarm
         id: launch
         run: |
           # Make script executable
