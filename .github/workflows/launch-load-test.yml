@@ -27,6 +27,41 @@ on:
         type: choice
         options: ['staging', 'production']
 
+      # Test Configuration
+      scenario:
+        description: 'Test scenario'
+        required: true
+        default: 'place_order'
+        type: choice
+        options: ['place_order', 'visit_widget', 'rush']
+      test_duration_minutes:
+        description: 'Test duration (minutes)'
+        required: true
+        default: '5'
+        type: number
+
+      # Optional Overrides (leave empty to use environment defaults)
+      users:
+        description: 'Number of users (default: 100 staging, 500 prod)'
+        required: false
+        type: string
+      spawn_rate:
+        description: 'Spawn rate (default: 1 staging, 4 prod)'
+        required: false
+        type: string
+      host:
+        description: 'Target host (default: staging or prod based on environment)'
+        required: false
+        type: string
+      booking_fee_id:
+        description: 'Booking Fee ID (default: 306 staging, 154 prod)'
+        required: false
+        type: string
+      slug:
+        description: 'Provider slug (default: pretend-school staging, sawyer-engineering-test-provider prod)'
+        required: false
+        type: string
+
 jobs:
   launch-swarm:
     runs-on: ubuntu-latest
@@ -63,6 +98,56 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
+      - name: Set test parameters with environment defaults
+        id: test_params
+        run: |
+          # Set defaults based on environment
+          if [ "${{ inputs.environment }}" == "staging" ]; then
+            DEFAULT_USERS=100
+            DEFAULT_SPAWN_RATE=1
+            DEFAULT_HOST="https://staging.hisawyer.com"
+            DEFAULT_BOOKING_FEE_ID=306
+            DEFAULT_SLUG="pretend-school"
+          else
+            DEFAULT_USERS=500
+            DEFAULT_SPAWN_RATE=4
+            DEFAULT_HOST="https://www.hisawyer.com"
+            DEFAULT_BOOKING_FEE_ID=154
+            DEFAULT_SLUG="sawyer-engineering-test-provider"
+          fi
+
+          # Use override if provided, otherwise use default
+          USERS="${{ inputs.users }}"
+          USERS=${USERS:-$DEFAULT_USERS}
+
+          SPAWN_RATE="${{ inputs.spawn_rate }}"
+          SPAWN_RATE=${SPAWN_RATE:-$DEFAULT_SPAWN_RATE}
+
+          HOST="${{ inputs.host }}"
+          HOST=${HOST:-$DEFAULT_HOST}
+
+          BOOKING_FEE_ID="${{ inputs.booking_fee_id }}"
+          BOOKING_FEE_ID=${BOOKING_FEE_ID:-$DEFAULT_BOOKING_FEE_ID}
+
+          SLUG="${{ inputs.slug }}"
+          SLUG=${SLUG:-$DEFAULT_SLUG}
+
+          # Export to outputs
+          echo "users=$USERS" >> $GITHUB_OUTPUT
+          echo "spawn_rate=$SPAWN_RATE" >> $GITHUB_OUTPUT
+          echo "host=$HOST" >> $GITHUB_OUTPUT
+          echo "booking_fee_id=$BOOKING_FEE_ID" >> $GITHUB_OUTPUT
+          echo "slug=$SLUG" >> $GITHUB_OUTPUT
+          echo "scenario=${{ inputs.scenario }}" >> $GITHUB_OUTPUT
+
+          echo "✓ Test parameters configured:"
+          echo "  Users: $USERS"
+          echo "  Spawn Rate: $SPAWN_RATE"
+          echo "  Host: $HOST"
+          echo "  Scenario: ${{ inputs.scenario }}"
+          echo "  Booking Fee ID: $BOOKING_FEE_ID"
+          echo "  Slug: $SLUG"
+
       - name: Create .env file
         run: |
           echo "LOAD_TEST_TOKEN=${{ secrets.LOAD_TEST_TOKEN }}" > .env
@@ -70,10 +155,22 @@ jobs:
 
       - name: Update launch script configuration
         run: |
-          # Temporarily update worker count and instance type in launch script
+          # Update worker count and instance type in launch script
           sed -i "s/WORKER_COUNT=3/WORKER_COUNT=${{ inputs.workers }}/" launch-swarm.sh
           sed -i "s/INSTANCE_TYPE=\"t3.medium\"/INSTANCE_TYPE=\"${{ inputs.instance_type }}\"/" launch-swarm.sh
-          echo "✓ Updated launch script with worker count: ${{ inputs.workers }}, instance type: ${{ inputs.instance_type }}"
+
+          # Update test parameters in setup scripts
+          sed -i "s|--scenario=place_order|--scenario=${{ steps.test_params.outputs.scenario }}|g" swarm_scripts/master_setup.sh
+          sed -i "s|--slug=pretend-school|--slug=${{ steps.test_params.outputs.slug }}|g" swarm_scripts/master_setup.sh
+          sed -i "s|--booking_fee_id=306|--booking_fee_id=${{ steps.test_params.outputs.booking_fee_id }}|g" swarm_scripts/master_setup.sh
+          sed -i "s|--host=https://staging.hisawyer.com|--host=${{ steps.test_params.outputs.host }}|g" swarm_scripts/master_setup.sh
+
+          sed -i "s|--scenario=place_order|--scenario=${{ steps.test_params.outputs.scenario }}|g" swarm_scripts/worker_setup.sh
+          sed -i "s|--slug=pretend-school|--slug=${{ steps.test_params.outputs.slug }}|g" swarm_scripts/worker_setup.sh
+          sed -i "s|--booking_fee_id=306|--booking_fee_id=${{ steps.test_params.outputs.booking_fee_id }}|g" swarm_scripts/worker_setup.sh
+          sed -i "s|--host=https://staging.hisawyer.com|--host=${{ steps.test_params.outputs.host }}|g" swarm_scripts/worker_setup.sh
+
+          echo "✓ Updated launch script and setup scripts with configuration"
 
       - name: Launch EC2 swarm
         id: launch
@@ -139,18 +236,108 @@ jobs:
             echo "   Check Web UI manually in a few minutes."
           fi
 
-      - name: Monitor and auto-terminate
+      - name: Start load test
+        id: start_test
         run: |
-          DURATION_SECONDS=$((3600 * ${{ inputs.max_duration_hours }}))
+          MASTER_IP="${{ steps.launch.outputs.master_ip }}"
+          USERS="${{ steps.test_params.outputs.users }}"
+          SPAWN_RATE="${{ steps.test_params.outputs.spawn_rate }}"
 
-          echo "⏰ Swarm will run for ${{ inputs.max_duration_hours }} hour(s)"
-          echo "   Started at: ${{ steps.launch.outputs.launch_time }}"
-          echo "   Will terminate at: $(date -u -d "+${{ inputs.max_duration_hours }} hours" +"%Y-%m-%d %H:%M:%S UTC" 2>/dev/null || date -u -v+${{ inputs.max_duration_hours }}H +"%Y-%m-%d %H:%M:%S UTC")"
+          echo "🚀 Starting load test..."
+          echo "  Users: $USERS"
+          echo "  Spawn Rate: $SPAWN_RATE"
+          echo "  Duration: ${{ inputs.test_duration_minutes }} minutes"
 
-          # Sleep for the duration
+          # Start the swarm via API
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            "http://$MASTER_IP:8089/swarm" \
+            -d "user_count=$USERS" \
+            -d "spawn_rate=$SPAWN_RATE")
+
+          if [ "$HTTP_CODE" == "200" ]; then
+            echo "✓ Load test started successfully"
+            echo "start_time=$(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Failed to start load test (HTTP $HTTP_CODE)"
+            exit 1
+          fi
+
+          # Update summary with test execution info
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "## 🏃 Load Test Running" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Test Configuration:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Scenario: ${{ steps.test_params.outputs.scenario }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Users: $USERS" >> $GITHUB_STEP_SUMMARY
+          echo "- Spawn Rate: $SPAWN_RATE users/sec" >> $GITHUB_STEP_SUMMARY
+          echo "- Host: ${{ steps.test_params.outputs.host }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Duration: ${{ inputs.test_duration_minutes }} minutes" >> $GITHUB_STEP_SUMMARY
+          echo "- Started: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+
+      - name: Monitor test execution
+        run: |
+          MASTER_IP="${{ steps.launch.outputs.master_ip }}"
+          DURATION_SECONDS=$((60 * ${{ inputs.test_duration_minutes }}))
+
+          echo "⏱️  Test will run for ${{ inputs.test_duration_minutes }} minute(s)..."
+          echo "   Monitor progress at: http://$MASTER_IP:8089"
+
+          # Sleep for the test duration
           sleep $DURATION_SECONDS
 
-          echo "⏰ Max duration reached. Terminating swarm..."
+          echo "✓ Test duration completed"
+
+      - name: Stop load test and download results
+        id: results
+        if: always()  # Run even if monitoring step is cancelled
+        run: |
+          MASTER_IP="${{ steps.launch.outputs.master_ip }}"
+
+          echo "🛑 Stopping load test..."
+
+          # Stop the test
+          curl -X GET "http://$MASTER_IP:8089/stop" || echo "Test may already be stopped"
+
+          # Download results CSV
+          echo "📊 Downloading results..."
+          curl -o results.csv "http://$MASTER_IP:8089/stats/requests/csv"
+          curl -o results_stats.csv "http://$MASTER_IP:8089/stats/requests_full_history/csv"
+          curl -o results_failures.csv "http://$MASTER_IP:8089/exceptions/csv"
+
+          echo "✓ Results downloaded"
+          echo "results_downloaded=true" >> $GITHUB_OUTPUT
+
+      - name: Upload test results
+        if: steps.results.outputs.results_downloaded == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-test-results-${{ inputs.environment }}-${{ github.run_number }}
+          path: |
+            results.csv
+            results_stats.csv
+            results_failures.csv
+          retention-days: 30
+
+      - name: Display test summary
+        if: steps.results.outputs.results_downloaded == 'true'
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "## ✅ Load Test Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Completed at: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📊 **Results available in workflow artifacts**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Quick stats from results:" >> $GITHUB_STEP_SUMMARY
+
+          # Show summary from CSV
+          if [ -f results.csv ]; then
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            head -20 results.csv >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          fi
 
       - name: Terminate swarm
         if: always()  # Always run cleanup, even if previous steps fail
