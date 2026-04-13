@@ -61,6 +61,11 @@ on:
         description: 'Provider slug (default: pretend-school staging, sawyer-engineering-test-provider prod)'
         required: false
         type: string
+      actually_place_orders:
+        description: 'Actually place orders (WARNING: creates real orders!)'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   launch-swarm:
@@ -170,9 +175,15 @@ jobs:
           sed -i "s|--booking_fee_id=306|--booking_fee_id=${{ steps.test_params.outputs.booking_fee_id }}|g" swarm_scripts/worker_setup.sh
           sed -i "s|--host=https://staging.hisawyer.com|--host=${{ steps.test_params.outputs.host }}|g" swarm_scripts/worker_setup.sh
 
-          echo "✓ Updated launch script and setup scripts with configuration"
+          # Add --actually-place-orders flag if enabled
+          if [ "${{ inputs.actually_place_orders }}" == "true" ]; then
+            echo "⚠️  WARNING: Orders will actually be placed!"
+            sed -i "s|--host=|--actually-place-orders --host=|g" swarm_scripts/master_setup.sh
+            sed -i "s|--host=|--actually-place-orders --host=|g" swarm_scripts/worker_setup.sh
+          else
+            echo "✓ Orders will NOT be placed (safe mode)"
+          fi
 
-      - name: Launch EC2 swarm
         id: launch
         run: |
           # Make script executable
@@ -273,6 +284,7 @@ jobs:
           echo "- Spawn Rate: $SPAWN_RATE users/sec" >> $GITHUB_STEP_SUMMARY
           echo "- Host: ${{ steps.test_params.outputs.host }}" >> $GITHUB_STEP_SUMMARY
           echo "- Duration: ${{ inputs.test_duration_minutes }} minutes" >> $GITHUB_STEP_SUMMARY
+          echo "- Actually Place Orders: ${{ inputs.actually_place_orders }}" >> $GITHUB_STEP_SUMMARY
           echo "- Started: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
 
       - name: Monitor test execution

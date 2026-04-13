@@ -49,3 +49,5 @@ def custom_args(parser):
                         "visit_widget", "rush"], default="place_order", help="Scenario")
     parser.add_argument("--slug", is_required=True, default="pretend-school")
     parser.add_argument("--booking_fee_id", is_required=True, default="306")
+    parser.add_argument("--actually-place-orders", action="store_true",
+                        help="Actually place orders (default: False - stops before placing order)")

@@ -64,10 +64,11 @@ class PlaceOrderScenario(SequentialTaskSet):
     def on_start(self):
         self.slug = self.user.environment.parsed_options.slug
         self.booking_fee_id = self.user.environment.parsed_options.booking_fee_id
+        self.actually_place_orders = self.user.environment.parsed_options.actually_place_orders
 
         # Dynamically select users module based on host
         if self.user.host and any(domain in self.user.host for domain in ["www.hisawyer.com", "fir.hisawyer.com"]):
-            selself.users_module.f.users_module = importlib.import_module("utils.users_prod")
+            self.users_module = importlib.import_module("utils.users_prod")
         elif self.user.host and "staging.hisawyer.com" in self.user.host:
             self.users_module = importlib.import_module("utils.users_staging")
         else:
@@ -244,27 +245,30 @@ class PlaceOrderScenario(SequentialTaskSet):
 
         time.sleep(random.uniform(1, 10))
 
-        # Place the order
-        place_order_response = self.client.post(
-            f"/{self.slug}/schedules/checkout/place_order",
-            data={
-                "authenticity_token": self.csrf_token,
-                "view": "",
-                "booking_fee_id": self.booking_fee_id,
-                f"provider_form_responses[{provider_id}][id]": "",
-                f"provider_form_responses[{provider_id}][response]": "true",
-                "provider_fee_ids": "",
-                "one_off_payment_method_type": "",
-                "button": "place-order",
-                "slug": f"{self.slug}"
-            },
-            headers={
-                "Content-Type": FORM_HEADER,
-                "X-Requested-With": "XMLHttpRequest",
-                "Accept": "text/javascript"
-            }
-        )
-        print(f"{user['email']} placed an order")
+        # Place the order (only if --actually-place-orders flag is set)
+        if self.actually_place_orders:
+            place_order_response = self.client.post(
+                f"/{self.slug}/schedules/checkout/place_order",
+                data={
+                    "authenticity_token": self.csrf_token,
+                    "view": "",
+                    "booking_fee_id": self.booking_fee_id,
+                    f"provider_form_responses[{provider_id}][id]": "",
+                    f"provider_form_responses[{provider_id}][response]": "true",
+                    "provider_fee_ids": "",
+                    "one_off_payment_method_type": "",
+                    "button": "place-order",
+                    "slug": f"{self.slug}"
+                },
+                headers={
+                    "Content-Type": FORM_HEADER,
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Accept": "text/javascript"
+                }
+            )
+            print(f"{user['email']} placed an order")
+        else:
+            print(f"{user['email']} stopped at checkout (order NOT placed)")
 
         time.sleep(random.uniform(10, 15))
 
