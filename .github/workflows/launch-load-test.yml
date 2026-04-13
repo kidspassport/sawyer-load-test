@@ -92,6 +92,10 @@ jobs:
 
       - name: Display swarm information
         run: |
+          # Output as a notice for immediate visibility
+          echo "::notice title=Web UI Ready::🌐 Access Locust at http://${{ steps.launch.outputs.master_ip }}:8089 (wait 3-5 min for setup)"
+
+          # Also write to step summary
           echo "## 🚀 Load Test Swarm Launched!" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Configuration:**" >> $GITHUB_STEP_SUMMARY
