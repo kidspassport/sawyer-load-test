@@ -76,7 +76,7 @@ class PlaceOrderScenario(SequentialTaskSet):
 
     @task
     def add_to_cart(self):
-        user = get_random_user()
+        user = self.users_module.get_random_user()
         time.sleep(random.uniform(1, 10))
         csrf_token = login(self.client, user)
 
