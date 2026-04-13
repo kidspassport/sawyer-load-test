@@ -3,12 +3,12 @@ import json
 import random
 import re
 import time
+import importlib
 from urllib.parse import urlparse, parse_qs
 from locust import SequentialTaskSet, task
 from bs4 import BeautifulSoup
 
 from utils.auth import extract_csrf_token, login
-from utils.users import get_random_user
 
 API_ACCEPT_HEADER = "application/json"
 HTML_ACCEPT_HEADER = "text/html"
@@ -64,6 +64,14 @@ class PlaceOrderScenario(SequentialTaskSet):
     def on_start(self):
         self.slug = self.user.environment.parsed_options.slug
         self.booking_fee_id = self.user.environment.parsed_options.booking_fee_id
+
+        # Dynamically select users module based on host
+        if self.user.host and any(domain in self.user.host for domain in ["www.hisawyer.com", "fir.hisawyer.com"]):
+            selself.users_module.f.users_module = importlib.import_module("utils.users_prod")
+        elif self.user.host and "staging.hisawyer.com" in self.user.host:
+            self.users_module = importlib.import_module("utils.users_staging")
+        else:
+            self.users_module = importlib.import_module("utils.users")
 
     @task
     def add_to_cart(self):
