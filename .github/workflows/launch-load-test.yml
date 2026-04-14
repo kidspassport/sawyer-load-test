@@ -237,14 +237,14 @@ jobs:
           heroku --version
           echo "✓ Heroku CLI installed"
 
-      - name: Scale up Aurora database
-        env:
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-        run: |
-          echo "🗄️ Scaling Aurora database to ${{ steps.test_params.outputs.min_acu }}-${{ steps.test_params.outputs.max_acu }} ACUs..."
-          heroku run \
-            --app ${{ steps.test_params.outputs.heroku_app }} \
-            "rake aurora:scale_for_load_test[${{ steps.test_params.outputs.min_acu }},${{ steps.test_params.outputs.max_acu }}]"
+      # - name: Scale up Aurora database
+      #   env:
+      #     HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+      #   run: |
+      #     echo "🗄️ Scaling Aurora database to ${{ steps.test_params.outputs.min_acu }}-${{ steps.test_params.outputs.max_acu }} ACUs..."
+      #     heroku run \
+      #       --app ${{ steps.test_params.outputs.heroku_app }} \
+      #       "rake aurora:scale_for_load_test[${{ steps.test_params.outputs.min_acu }},${{ steps.test_params.outputs.max_acu }}]"
 
       - name: Scale up Heroku dynos via HireFire
         env:
@@ -441,15 +441,15 @@ jobs:
             --app ${{ steps.test_params.outputs.heroku_app }} \
             "rake hirefire:cleanup_load_test"
 
-      - name: Restore Aurora database
-        if: always()  # Run restore even if tests fail
-        env:
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-        run: |
-          echo "🗄️ Restoring Aurora database to original ACU values..."
-          heroku run \
-            --app ${{ steps.test_params.outputs.heroku_app }} \
-            "rake aurora:restore_after_load_test"
+      # - name: Restore Aurora database
+      #   if: always()  # Run restore even if tests fail
+      #   env:
+      #     HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+      #   run: |
+      #     echo "🗄️ Restoring Aurora database to original ACU values..."
+      #     heroku run \
+      #       --app ${{ steps.test_params.outputs.heroku_app }} \
+      #       "rake aurora:restore_after_load_test"
 
       - name: Check final infrastructure status
         if: always()
