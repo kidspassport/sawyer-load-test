@@ -268,7 +268,7 @@ jobs:
           echo "📈 Scheduling HireFire time range for load test..."
           # Convert test duration from minutes to minutes format (e.g., "30m")
           DURATION="${{ inputs.test_duration_minutes }}m"
-          heroku run \
+          heroku run --no-tty \
             --app ${{ steps.test_params.outputs.heroku_app }} \
             "rake hirefire:schedule_load_test[$DURATION,${{ steps.test_params.outputs.min_dynos }},${{ steps.test_params.outputs.max_dynos }}]"
 
@@ -452,7 +452,7 @@ jobs:
           HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: |
           echo "🧹 Cleaning up HireFire time ranges..."
-          heroku run \
+          heroku run --no-tty \
             --app ${{ steps.test_params.outputs.heroku_app }} \
             "rake hirefire:cleanup_load_test"
 
@@ -475,7 +475,7 @@ jobs:
           heroku ps --app ${{ steps.test_params.outputs.heroku_app }}
           echo ""
           echo "📊 Final Aurora status:"
-          heroku run \
+          heroku run --no-tty \
             --app ${{ steps.test_params.outputs.heroku_app }} \
             "rake aurora:current_config"
 
