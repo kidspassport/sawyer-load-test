@@ -67,6 +67,26 @@ on:
         type: boolean
         default: false
 
+      # Heroku Dyno Scaling (leave empty to use environment defaults)
+      min_dynos:
+        description: 'Minimum dynos (default: 5 staging, 10 prod)'
+        required: false
+        type: string
+      max_dynos:
+        description: 'Maximum dynos (default: 15 staging, 30 prod)'
+        required: false
+        type: string
+
+      # Aurora Database Scaling (leave empty to use environment defaults)
+      min_acu:
+        description: 'Aurora minimum ACUs (default: 4 staging, 8 prod)'
+        required: false
+        type: string
+      max_acu:
+        description: 'Aurora maximum ACUs (default: 32 staging, 64 prod)'
+        required: false
+        type: string
+
 jobs:
   launch-swarm:
     runs-on: ubuntu-latest
@@ -113,12 +133,22 @@ jobs:
             DEFAULT_HOST="https://staging.hisawyer.com"
             DEFAULT_BOOKING_FEE_ID=306
             DEFAULT_SLUG="pretend-school"
+            DEFAULT_MIN_DYNOS=5
+            DEFAULT_MAX_DYNOS=15
+            DEFAULT_MIN_ACU=4
+            DEFAULT_MAX_ACU=32
+            HEROKU_APP="sawyer-staging"
           else
             DEFAULT_USERS=500
             DEFAULT_SPAWN_RATE=4
             DEFAULT_HOST="https://www.hisawyer.com"
             DEFAULT_BOOKING_FEE_ID=154
             DEFAULT_SLUG="sawyer-engineering-test-provider"
+            DEFAULT_MIN_DYNOS=10
+            DEFAULT_MAX_DYNOS=30
+            DEFAULT_MIN_ACU=8
+            DEFAULT_MAX_ACU=64
+            HEROKU_APP="sawyer-prod"
           fi
 
           # Use override if provided, otherwise use default
@@ -137,6 +167,18 @@ jobs:
           SLUG="${{ inputs.slug }}"
           SLUG=${SLUG:-$DEFAULT_SLUG}
 
+          MIN_DYNOS="${{ inputs.min_dynos }}"
+          MIN_DYNOS=${MIN_DYNOS:-$DEFAULT_MIN_DYNOS}
+
+          MAX_DYNOS="${{ inputs.max_dynos }}"
+          MAX_DYNOS=${MAX_DYNOS:-$DEFAULT_MAX_DYNOS}
+
+          MIN_ACU="${{ inputs.min_acu }}"
+          MIN_ACU=${MIN_ACU:-$DEFAULT_MIN_ACU}
+
+          MAX_ACU="${{ inputs.max_acu }}"
+          MAX_ACU=${MAX_ACU:-$DEFAULT_MAX_ACU}
+
           # Export to outputs
           echo "users=$USERS" >> $GITHUB_OUTPUT
           echo "spawn_rate=$SPAWN_RATE" >> $GITHUB_OUTPUT
@@ -144,6 +186,11 @@ jobs:
           echo "booking_fee_id=$BOOKING_FEE_ID" >> $GITHUB_OUTPUT
           echo "slug=$SLUG" >> $GITHUB_OUTPUT
           echo "scenario=${{ inputs.scenario }}" >> $GITHUB_OUTPUT
+          echo "min_dynos=$MIN_DYNOS" >> $GITHUB_OUTPUT
+          echo "max_dynos=$MAX_DYNOS" >> $GITHUB_OUTPUT
+          echo "min_acu=$MIN_ACU" >> $GITHUB_OUTPUT
+          echo "max_acu=$MAX_ACU" >> $GITHUB_OUTPUT
+          echo "heroku_app=$HEROKU_APP" >> $GITHUB_OUTPUT
 
           echo "✓ Test parameters configured:"
           echo "  Users: $USERS"
@@ -152,16 +199,9 @@ jobs:
           echo "  Scenario: ${{ inputs.scenario }}"
           echo "  Booking Fee ID: $BOOKING_FEE_ID"
           echo "  Slug: $SLUG"
-
-      - name: Create .env file
-        run: |
-          echo "LOAD_TEST_TOKEN=${{ secrets.LOAD_TEST_TOKEN }}" > .env
-          echo "✓ Created .env file with token"
-
-      - name: Update launch script configuration
-        run: |
-          # Update worker count and instance type in launch script
-          sed -i "s/WORKER_COUNT=3/WORKER_COUNT=${{ inputs.workers }}/" launch-swarm.sh
+          echo "  Heroku App: $HEROKU_APP"
+          echo "  Dynos: $MIN_DYNOS-$MAX_DYNOS"
+          echo "  Aurora ACUs: $MIN_ACU-$MAX_ACU"
           sed -i "s/INSTANCE_TYPE=\"t3.medium\"/INSTANCE_TYPE=\"${{ inputs.instance_type }}\"/" launch-swarm.sh
 
           # Update test parameters in setup scripts
@@ -185,6 +225,43 @@ jobs:
           fi
 
           echo "✓ Updated launch script and setup scripts with configuration"
+
+      - name: Create .env file
+        run: |
+          echo "LOAD_TEST_TOKEN=${{ secrets.LOAD_TEST_TOKEN }}" > .env
+          echo "✓ Created .env file with token"
+
+      - name: Install Heroku CLI
+        run: |
+          curl https://cli-assets.heroku.com/install.sh | sh
+          heroku --version
+          echo "✓ Heroku CLI installed"
+
+      - name: Scale up Aurora database
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          echo "🗄️ Scaling Aurora database to ${{ steps.test_params.outputs.min_acu }}-${{ steps.test_params.outputs.max_acu }} ACUs..."
+          heroku run \
+            --app ${{ steps.test_params.outputs.heroku_app }} \
+            "rake aurora:scale_for_load_test[${{ steps.test_params.outputs.min_acu }},${{ steps.test_params.outputs.max_acu }}]"
+
+      - name: Scale up Heroku dynos via HireFire
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          echo "📈 Scheduling HireFire time range for load test..."
+          # Convert test duration from minutes to minutes format (e.g., "30m")
+          DURATION="${{ inputs.test_duration_minutes }}m"
+          heroku run \
+            --app ${{ steps.test_params.outputs.heroku_app }} \
+            "rake hirefire:schedule_load_test[$DURATION,${{ steps.test_params.outputs.min_dynos }},${{ steps.test_params.outputs.max_dynos }}]"
+
+      - name: Wait for infrastructure scaling
+        run: |
+          echo "⏳ Waiting 3 minutes for dynos and database to scale up..."
+          sleep 180
+          echo "✓ Scaling wait complete"
 
       - name: Launch EC2 swarm
         id: launch
@@ -353,6 +430,39 @@ jobs:
             head -20 results.csv >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           fi
+
+      - name: Clean up HireFire time ranges
+        if: always()  # Run cleanup even if tests fail
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          echo "🧹 Cleaning up HireFire time ranges..."
+          heroku run \
+            --app ${{ steps.test_params.outputs.heroku_app }} \
+            "rake hirefire:cleanup_load_test"
+
+      - name: Restore Aurora database
+        if: always()  # Run restore even if tests fail
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          echo "🗄️ Restoring Aurora database to original ACU values..."
+          heroku run \
+            --app ${{ steps.test_params.outputs.heroku_app }} \
+            "rake aurora:restore_after_load_test"
+
+      - name: Check final infrastructure status
+        if: always()
+        env:
+          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+        run: |
+          echo "📊 Final dyno status:"
+          heroku ps --app ${{ steps.test_params.outputs.heroku_app }}
+          echo ""
+          echo "📊 Final Aurora status:"
+          heroku run \
+            --app ${{ steps.test_params.outputs.heroku_app }} \
+            "rake aurora:current_config"
 
       - name: Terminate swarm
         if: always()  # Always run cleanup, even if previous steps fail
