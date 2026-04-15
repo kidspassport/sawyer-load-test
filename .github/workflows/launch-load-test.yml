@@ -231,46 +231,40 @@ jobs:
           echo "LOAD_TEST_TOKEN=${{ secrets.LOAD_TEST_TOKEN }}" > .env
           echo "✓ Created .env file with token"
 
-      - name: Install Heroku CLI
+      - name: Scale up infrastructure via API
         run: |
-          curl https://cli-assets.heroku.com/install.sh | sh
-          heroku --version
-          echo "✓ Heroku CLI installed"
+          echo "📈 Scaling up infrastructure for load test..."
 
-      - name: Login to Heroku
-        env:
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-        run: |
-          # Create .netrc file for Heroku authentication
-          cat >~/.netrc <<EOF
-          machine api.heroku.com
-            password $HEROKU_API_KEY
-          machine git.heroku.com
-            password $HEROKU_API_KEY
-          EOF
-          chmod 600 ~/.netrc
-          heroku auth:whoami
-          echo "✓ Heroku authenticated"
+          # Determine the host URL based on heroku_app
+          if [ "${{ steps.test_params.outputs.heroku_app }}" == "sawyer-staging" ]; then
+            HOST_URL="https://staging.hisawyer.com"
+          else
+            HOST_URL="https://www.hisawyer.com"
+          fi
 
-      # - name: Scale up Aurora database
-      #   env:
-      #     HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-      #   run: |
-      #     echo "🗄️ Scaling Aurora database to ${{ steps.test_params.outputs.min_acu }}-${{ steps.test_params.outputs.max_acu }} ACUs..."
-      #     heroku run \
-      #       --app ${{ steps.test_params.outputs.heroku_app }} \
-      #       "rake aurora:scale_for_load_test[${{ steps.test_params.outputs.min_acu }},${{ steps.test_params.outputs.max_acu }}]"
+          response=$(curl -s -w "\n%{http_code}" -X POST \
+            -H "Authorization: Bearer ${{ secrets.LOAD_TEST_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "min_dynos": ${{ steps.test_params.outputs.min_dynos }},
+              "max_dynos": ${{ steps.test_params.outputs.max_dynos }},
+              "min_acu": ${{ steps.test_params.outputs.min_acu }},
+              "max_acu": ${{ steps.test_params.outputs.max_acu }},
+              "duration_minutes": ${{ inputs.test_duration_minutes }}
+            }' \
+            "${HOST_URL}/api/v1/load_tests/scale_up")
 
-      - name: Scale up Heroku dynos via HireFire
-        env:
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-        run: |
-          echo "📈 Scheduling HireFire time range for load test..."
-          # Convert test duration from minutes to minutes format (e.g., "30m")
-          DURATION="${{ inputs.test_duration_minutes }}m"
-          heroku run --no-tty \
-            --app ${{ steps.test_params.outputs.heroku_app }} \
-            "rake hirefire:schedule_load_test[$DURATION,${{ steps.test_params.outputs.min_dynos }},${{ steps.test_params.outputs.max_dynos }}]"
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+
+          echo "Response: $body"
+
+          if [ "$http_code" != "200" ]; then
+            echo "❌ Failed to scale up infrastructure (HTTP $http_code)"
+            exit 1
+          fi
+
+          echo "✅ Infrastructure scaled up successfully"
 
       - name: Wait for infrastructure scaling
         run: |
@@ -446,38 +440,35 @@ jobs:
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           fi
 
-      - name: Clean up HireFire time ranges
+      - name: Scale down infrastructure via API
         if: always()  # Run cleanup even if tests fail
-        env:
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
         run: |
-          echo "🧹 Cleaning up HireFire time ranges..."
-          heroku run --no-tty \
-            --app ${{ steps.test_params.outputs.heroku_app }} \
-            "rake hirefire:cleanup_load_test"
+          echo "🔻 Scaling down infrastructure..."
 
-      # - name: Restore Aurora database
-      #   if: always()  # Run restore even if tests fail
-      #   env:
-      #     HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-      #   run: |
-      #     echo "🗄️ Restoring Aurora database to original ACU values..."
-      #     heroku run \
-      #       --app ${{ steps.test_params.outputs.heroku_app }} \
-      #       "rake aurora:restore_after_load_test"
+          # Determine the host URL based on heroku_app
+          if [ "${{ steps.test_params.outputs.heroku_app }}" == "sawyer-staging" ]; then
+            HOST_URL="https://staging.hisawyer.com"
+          else
+            HOST_URL="https://www.hisawyer.com"
+          fi
 
-      - name: Check final infrastructure status
-        if: always()
-        env:
-          HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
-        run: |
-          echo "📊 Final dyno status:"
-          heroku ps --app ${{ steps.test_params.outputs.heroku_app }}
-          echo ""
-          echo "📊 Final Aurora status:"
-          heroku run --no-tty \
-            --app ${{ steps.test_params.outputs.heroku_app }} \
-            "rake aurora:current_config"
+          response=$(curl -s -w "\n%{http_code}" -X POST \
+            -H "Authorization: Bearer ${{ secrets.LOAD_TEST_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            "${HOST_URL}/api/v1/load_tests/scale_down")
+
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+
+          echo "Response: $body"
+
+          if [ "$http_code" != "200" ]; then
+            echo "⚠️  Failed to scale down infrastructure (HTTP $http_code)"
+            echo "You may need to manually restore infrastructure"
+            # Don't exit 1 here - we want to continue with EC2 cleanup
+          else
+            echo "✅ Infrastructure restored successfully"
+          fi
 
       - name: Terminate swarm
         if: always()  # Always run cleanup, even if previous steps fail
