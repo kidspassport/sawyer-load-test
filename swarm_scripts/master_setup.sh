@@ -32,7 +32,7 @@ User=locust
 WorkingDirectory=/home/locust/sawyer-load-test
 Environment="PATH=/home/locust/venv/bin:/usr/local/bin:/usr/bin:/bin"
 Environment="PYTHONUNBUFFERED=1"
-Environment="LOAD_TEST_TOKEN=\${load_test_token}"
+Environment="LOAD_TEST_TOKEN=${load_test_token}"
 ExecStart=/home/locust/venv/bin/locust \\
   --master \
   --master-bind-port=5557 \
