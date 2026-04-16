@@ -270,11 +270,11 @@ jobs:
 
           echo "✅ Infrastructure scaled up successfully"
 
-      - name: Wait for infrastructure scaling
-        run: |
-          echo "⏳ Waiting 3 minutes for dynos and database to scale up..."
-          sleep 180
-          echo "✓ Scaling wait complete"
+      # - name: Wait for infrastructure scaling
+      #   run: |
+      #     echo "⏳ Waiting 3 minutes for dynos and database to scale up..."
+      #     sleep 180
+      #     echo "✓ Scaling wait complete"
 
       - name: Launch EC2 swarm
         id: launch
@@ -328,17 +328,48 @@ jobs:
           echo "✓ Initial setup should be complete"
 
       - name: Verify swarm is healthy
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
         run: |
           MASTER_IP="${{ steps.launch.outputs.master_ip }}"
 
-          # Try to reach the web UI
+          # Try to reach the web UI with retries
           echo "Checking if Locust Web UI is accessible..."
-          if curl -s -o /dev/null -w "%{http_code}" "http://$MASTER_IP:8089" | grep -q "200"; then
-            echo "✓ Web UI is accessible at http://$MASTER_IP:8089"
-          else
-            echo "⚠️  Web UI not yet accessible. May need more time to start."
-            echo "   Check Web UI manually in a few minutes."
+          MAX_RETRIES=10
+          RETRY_COUNT=0
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://$MASTER_IP:8089" || echo "000")
+
+            if [ "$HTTP_CODE" == "200" ]; then
+              echo "✓ Web UI is accessible at http://$MASTER_IP:8089"
+              exit 0
+            fi
+
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            echo "Attempt $RETRY_COUNT/$MAX_RETRIES: Web UI returned HTTP $HTTP_CODE, waiting 30s..."
+            sleep 30
+          done
+
+          echo "❌ Web UI not accessible after $MAX_RETRIES attempts"
+          echo "Fetching master instance details for troubleshooting..."
+
+          # Get instance ID from tag
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Role,Values=master" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[0].Instances[0].InstanceId' \
+            --output text)
+
+          if [ "$INSTANCE_ID" != "None" ] && [ -n "$INSTANCE_ID" ]; then
+            echo "Master Instance ID: $INSTANCE_ID"
+            echo ""
+            echo "📋 System Log (last 50 lines):"
+            aws ec2 get-console-output --instance-id "$INSTANCE_ID" --query 'Output' --output text | tail -50 || echo "Could not fetch console output"
           fi
+
+          exit 1
 
       - name: Start load test
         id: start_test
