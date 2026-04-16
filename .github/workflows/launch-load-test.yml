@@ -202,18 +202,20 @@ jobs:
           echo "  Heroku App: $HEROKU_APP"
           echo "  Dynos: $MIN_DYNOS-$MAX_DYNOS"
           echo "  Aurora ACUs: $MIN_ACU-$MAX_ACU"
+
+          # Update instance type in launch script
           sed -i "s/INSTANCE_TYPE=\"t3.medium\"/INSTANCE_TYPE=\"${{ inputs.instance_type }}\"/" launch-swarm.sh
 
-          # Update test parameters in setup scripts
-          sed -i "s|--scenario=place_order|--scenario=${{ steps.test_params.outputs.scenario }}|g" swarm_scripts/master_setup.sh
-          sed -i "s|--slug=pretend-school|--slug=${{ steps.test_params.outputs.slug }}|g" swarm_scripts/master_setup.sh
-          sed -i "s|--booking_fee_id=306|--booking_fee_id=${{ steps.test_params.outputs.booking_fee_id }}|g" swarm_scripts/master_setup.sh
-          sed -i "s|--host=https://staging.hisawyer.com|--host=${{ steps.test_params.outputs.host }}|g" swarm_scripts/master_setup.sh
+          # Update test parameters in setup scripts (using shell variables, not step outputs)
+          sed -i "s|--scenario=place_order|--scenario=${{ inputs.scenario }}|g" swarm_scripts/master_setup.sh
+          sed -i "s|--slug=pretend-school|--slug=$SLUG|g" swarm_scripts/master_setup.sh
+          sed -i "s|--booking_fee_id=306|--booking_fee_id=$BOOKING_FEE_ID|g" swarm_scripts/master_setup.sh
+          sed -i "s|--host=https://staging.hisawyer.com|--host=$HOST|g" swarm_scripts/master_setup.sh
 
-          sed -i "s|--scenario=place_order|--scenario=${{ steps.test_params.outputs.scenario }}|g" swarm_scripts/worker_setup.sh
-          sed -i "s|--slug=pretend-school|--slug=${{ steps.test_params.outputs.slug }}|g" swarm_scripts/worker_setup.sh
-          sed -i "s|--booking_fee_id=306|--booking_fee_id=${{ steps.test_params.outputs.booking_fee_id }}|g" swarm_scripts/worker_setup.sh
-          sed -i "s|--host=https://staging.hisawyer.com|--host=${{ steps.test_params.outputs.host }}|g" swarm_scripts/worker_setup.sh
+          sed -i "s|--scenario=place_order|--scenario=${{ inputs.scenario }}|g" swarm_scripts/worker_setup.sh
+          sed -i "s|--slug=pretend-school|--slug=$SLUG|g" swarm_scripts/worker_setup.sh
+          sed -i "s|--booking_fee_id=306|--booking_fee_id=$BOOKING_FEE_ID|g" swarm_scripts/worker_setup.sh
+          sed -i "s|--host=https://staging.hisawyer.com|--host=$HOST|g" swarm_scripts/worker_setup.sh
 
           # Add --actually-place-orders flag if enabled
           if [ "${{ inputs.actually_place_orders }}" == "true" ]; then
