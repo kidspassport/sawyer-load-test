@@ -57,6 +57,6 @@ systemctl daemon-reload
 systemctl enable locust-master
 systemctl start locust-master
 
-# Install CloudWatch agent for monitoring (optional but recommended)
+# Install CloudWatch agent for monitoring
 wget https://s3.amazonaws.com/amazoncloudwatch-agent/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
 dpkg -i amazon-cloudwatch-agent.deb

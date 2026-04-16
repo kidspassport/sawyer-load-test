@@ -206,7 +206,7 @@ jobs:
           # Update instance type in launch script
           sed -i "s/INSTANCE_TYPE=\"t3.medium\"/INSTANCE_TYPE=\"${{ inputs.instance_type }}\"/" launch-swarm.sh
 
-          # Update test parameters in setup scripts (using shell variables, not step outputs)
+          # Update test parameters in setup scripts
           sed -i "s|--scenario=place_order|--scenario=${{ inputs.scenario }}|g" swarm_scripts/master_setup.sh
           sed -i "s|--slug=pretend-school|--slug=$SLUG|g" swarm_scripts/master_setup.sh
           sed -i "s|--booking_fee_id=306|--booking_fee_id=$BOOKING_FEE_ID|g" swarm_scripts/master_setup.sh
@@ -283,12 +283,6 @@ jobs:
 
           echo "✅ Infrastructure scaled up successfully"
 
-      # - name: Wait for infrastructure scaling
-      #   run: |
-      #     echo "⏳ Waiting 3 minutes for dynos and database to scale up..."
-      #     sleep 180
-      #     echo "✓ Scaling wait complete"
-
       - name: Launch EC2 swarm
         id: launch
         run: |
@@ -355,7 +349,7 @@ jobs:
 
           # Try to reach the web UI with retries
           echo "Checking if Locust Web UI is accessible..."
-          MAX_RETRIES=15
+          MAX_RETRIES=10
           RETRY_COUNT=0
 
           while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
