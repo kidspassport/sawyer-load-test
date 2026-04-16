@@ -226,6 +226,17 @@ jobs:
 
           echo "✓ Updated launch script and setup scripts with configuration"
 
+          # Verify the master setup script is valid
+          echo ""
+          echo "📝 Verifying master setup script..."
+          if bash -n swarm_scripts/master_setup.sh; then
+            echo "✓ Master setup script syntax is valid"
+          else
+            echo "❌ Master setup script has syntax errors!"
+            cat swarm_scripts/master_setup.sh
+            exit 1
+          fi
+
       - name: Create .env file
         run: |
           echo "LOAD_TEST_TOKEN=${{ secrets.LOAD_TEST_TOKEN }}" > .env
@@ -282,6 +293,11 @@ jobs:
           # Make script executable
           chmod +x launch-swarm.sh
 
+          # Show what will be sent as user-data for debugging
+          echo "📋 Master setup script (first 50 lines):"
+          head -50 swarm_scripts/master_setup.sh
+          echo ""
+
           # Launch the swarm
           ./launch-swarm.sh | tee launch-output.txt
 
@@ -337,7 +353,7 @@ jobs:
 
           # Try to reach the web UI with retries
           echo "Checking if Locust Web UI is accessible..."
-          MAX_RETRIES=10
+          MAX_RETRIES=5
           RETRY_COUNT=0
 
           while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
