@@ -77,9 +77,7 @@ echo "   Worker SG: $WORKER_SG"
 # Create master user-data with load test token
 echo ""
 echo "📝 Creating master configuration with load test token..."
-cat > /tmp/master-user-data.sh <<EOF
-$(cat swarm_scripts/master_setup.sh | sed "s/\${load_test_token}/$LOAD_TEST_TOKEN/g")
-EOF
+sed "s/\${load_test_token}/$LOAD_TEST_TOKEN/g" swarm_scripts/master_setup.sh > /tmp/master-user-data.sh
 
 # Launch master instance
 echo ""
@@ -116,9 +114,7 @@ echo "   Master Public IP: $MASTER_PUBLIC_IP"
 # Create worker user-data with master IP and load test token
 echo ""
 echo "📝 Creating worker configuration..."
-cat > /tmp/worker-user-data.sh <<EOF
-$(cat swarm_scripts/worker_setup.sh | sed "s/\${master_ip}/$MASTER_PRIVATE_IP/g" | sed "s/\${load_test_token}/$LOAD_TEST_TOKEN/g")
-EOF
+sed "s/\${master_ip}/$MASTER_PRIVATE_IP/g" swarm_scripts/worker_setup.sh | sed "s/\${load_test_token}/$LOAD_TEST_TOKEN/g" > /tmp/worker-user-data.sh
 
 # Launch worker instances
 echo ""
