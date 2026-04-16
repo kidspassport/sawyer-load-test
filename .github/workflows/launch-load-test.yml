@@ -242,6 +242,10 @@ jobs:
             HOST_URL="https://www.hisawyer.com"
           fi
 
+          # Add 30 minutes of padding to allow for test startup/shutdown
+          SCALE_DURATION=$((${{ inputs.test_duration_minutes }} + 30))
+          echo "Test duration: ${{ inputs.test_duration_minutes }} minutes (scaling for ${SCALE_DURATION} minutes with 30min padding)"
+
           response=$(curl -s -w "\n%{http_code}" -X POST \
             -H "Authorization: Bearer ${{ secrets.LOAD_TEST_API_TOKEN }}" \
             -H "Content-Type: application/json" \
@@ -250,7 +254,7 @@ jobs:
               "max_dynos": ${{ steps.test_params.outputs.max_dynos }},
               "min_acu": ${{ steps.test_params.outputs.min_acu }},
               "max_acu": ${{ steps.test_params.outputs.max_acu }},
-              "duration_minutes": ${{ inputs.test_duration_minutes }}
+              "duration_minutes": '"${SCALE_DURATION}"'
             }' \
             "${HOST_URL}/api/v1/load_tests/scale_up")
 
