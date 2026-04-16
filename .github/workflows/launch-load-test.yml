@@ -353,7 +353,7 @@ jobs:
 
           # Try to reach the web UI with retries
           echo "Checking if Locust Web UI is accessible..."
-          MAX_RETRIES=5
+          MAX_RETRIES=15
           RETRY_COUNT=0
 
           while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
