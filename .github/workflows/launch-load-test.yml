@@ -456,6 +456,58 @@ jobs:
           echo "✓ Results downloaded"
           echo "results_downloaded=true" >> $GITHUB_OUTPUT
 
+      - name: Upload results to S3
+        if: steps.results.outputs.results_downloaded == 'true'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          # Create folder structure: results/YYYY-MM-DD/ENV-SCENARIO-runNNN/
+          TIMESTAMP=$(date -u +"%Y-%m-%d")
+          RUN_ID="${{ inputs.environment }}-${{ inputs.scenario }}-run${{ github.run_number }}"
+          S3_PATH="results/${TIMESTAMP}/${RUN_ID}"
+
+          echo "📤 Uploading results to S3..."
+          echo "   Path: s3://sawyer-load-test-results/${S3_PATH}/"
+
+          # Create metadata file with test configuration
+          cat > metadata.json <<EOF
+          {
+            "test_run_id": "${RUN_ID}",
+            "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "environment": "${{ inputs.environment }}",
+            "scenario": "${{ inputs.scenario }}",
+            "configuration": {
+              "workers": ${{ inputs.workers }},
+              "instance_type": "${{ inputs.instance_type }}",
+              "users": "${{ steps.test_params.outputs.users }}",
+              "spawn_rate": "${{ steps.test_params.outputs.spawn_rate }}",
+              "duration_minutes": ${{ inputs.test_duration_minutes }},
+              "host": "${{ steps.test_params.outputs.host }}",
+              "actually_placed_orders": ${{ inputs.actually_place_orders }}
+            },
+            "infrastructure": {
+              "dynos": "${{ steps.test_params.outputs.min_dynos }}-${{ steps.test_params.outputs.max_dynos }}",
+              "aurora_acu": "${{ steps.test_params.outputs.min_acu }}-${{ steps.test_params.outputs.max_acu }}"
+            },
+            "github": {
+              "workflow_run_id": "${{ github.run_id }}",
+              "workflow_url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+              "commit_sha": "${{ github.sha }}"
+            }
+          }
+          EOF
+
+          # Upload all files to S3
+          aws s3 cp results.csv "s3://sawyer-load-test-results/${S3_PATH}/results.csv"
+          aws s3 cp results_stats.csv "s3://sawyer-load-test-results/${S3_PATH}/results_stats.csv"
+          aws s3 cp results_failures.csv "s3://sawyer-load-test-results/${S3_PATH}/results_failures.csv"
+          aws s3 cp metadata.json "s3://sawyer-load-test-results/${S3_PATH}/metadata.json"
+
+          echo "✓ Results uploaded to S3"
+          echo "s3_path=${S3_PATH}" >> $GITHUB_OUTPUT
+
       - name: Upload test results
         if: steps.results.outputs.results_downloaded == 'true'
         uses: actions/upload-artifact@v4
@@ -476,7 +528,9 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Completed at: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "📊 **Results available in workflow artifacts**" >> $GITHUB_STEP_SUMMARY
+          echo "📊 **Results Storage**" >> $GITHUB_STEP_SUMMARY
+          echo "- GitHub Artifacts: Available in workflow artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- S3 Bucket: \`s3://sawyer-load-test-results/${{ steps.results.outputs.s3_path }}/\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Quick stats from results:" >> $GITHUB_STEP_SUMMARY
 
