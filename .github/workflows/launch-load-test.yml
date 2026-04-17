@@ -404,6 +404,7 @@ jobs:
           if [ "$HTTP_CODE" == "200" ]; then
             echo "✓ Load test started successfully"
             echo "start_time=$(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_OUTPUT
+            echo "start_time_ms=$(date -u +%s)000" >> $GITHUB_OUTPUT
           else
             echo "❌ Failed to start load test (HTTP $HTTP_CODE)"
             exit 1
@@ -455,6 +456,43 @@ jobs:
 
           echo "✓ Results downloaded"
           echo "results_downloaded=true" >> $GITHUB_OUTPUT
+          echo "end_time_ms=$(date -u +%s)000" >> $GITHUB_OUTPUT
+
+      - name: Fetch Grafana data
+        if: steps.results.outputs.results_downloaded == 'true'
+        env:
+          GRAFANA_API_TOKEN: ${{ secrets.GRAFANA_API_TOKEN }}
+        run: |
+          GRAFANA_URL="https://daysmartsawyer.grafana.net"
+          DASHBOARD_UID="mi9sfkq"
+          START_MS="${{ steps.start_test.outputs.start_time_ms }}"
+          END_MS="${{ steps.results.outputs.end_time_ms }}"
+
+          echo "📊 Fetching Grafana data for time window: ${START_MS} to ${END_MS}"
+
+          echo "📸 Fetching dashboard screenshot..."
+          SCREENSHOT_CODE=$(curl -s -o grafana-dashboard.png -w "%{http_code}" \
+            -H "Authorization: Bearer $GRAFANA_API_TOKEN" \
+            "${GRAFANA_URL}/render/d/${DASHBOARD_UID}/monitoring-dashboard?orgId=1&from=${START_MS}&to=${END_MS}&width=1920&height=1080&tz=UTC")
+
+          if [ "$SCREENSHOT_CODE" == "200" ]; then
+            echo "✓ Screenshot downloaded ($(du -h grafana-dashboard.png | cut -f1))"
+          else
+            echo "⚠️  Screenshot failed (HTTP $SCREENSHOT_CODE)"
+            rm -f grafana-dashboard.png
+          fi
+
+          echo "📋 Fetching dashboard definition..."
+          DASHBOARD_CODE=$(curl -s -o grafana-dashboard.json -w "%{http_code}" \
+            -H "Authorization: Bearer $GRAFANA_API_TOKEN" \
+            "${GRAFANA_URL}/api/dashboards/uid/${DASHBOARD_UID}")
+
+          if [ "$DASHBOARD_CODE" == "200" ]; then
+            echo "✓ Dashboard definition downloaded"
+          else
+            echo "⚠️  Dashboard definition failed (HTTP $DASHBOARD_CODE)"
+            rm -f grafana-dashboard.json
+          fi
 
       - name: Upload results to S3
         if: steps.results.outputs.results_downloaded == 'true'
@@ -504,6 +542,10 @@ jobs:
           aws s3 cp results_stats.csv "s3://sawyer-load-test-results/${S3_PATH}/results_stats.csv"
           aws s3 cp results_failures.csv "s3://sawyer-load-test-results/${S3_PATH}/results_failures.csv"
           aws s3 cp metadata.json "s3://sawyer-load-test-results/${S3_PATH}/metadata.json"
+
+          # Upload Grafana data if available
+          [ -f grafana-dashboard.png ] && aws s3 cp grafana-dashboard.png "s3://sawyer-load-test-results/${S3_PATH}/grafana-dashboard.png" && echo "✓ Grafana screenshot uploaded"
+          [ -f grafana-dashboard.json ] && aws s3 cp grafana-dashboard.json "s3://sawyer-load-test-results/${S3_PATH}/grafana-dashboard.json" && echo "✓ Grafana dashboard definition uploaded"
 
           echo "✓ Results uploaded to S3"
           echo "s3_path=${S3_PATH}" >> $GITHUB_OUTPUT
