@@ -520,6 +520,10 @@ jobs:
         env:
           GRAFANA_API_TOKEN: ${{ secrets.GRAFANA_API_TOKEN }}
         run: |
+          echo "⏳ Waiting 3 minutes for metrics to propagate to Grafana Cloud..."
+          sleep 180
+          echo "✓ Done waiting"
+
           if [ "${{ inputs.environment }}" == "staging" ]; then
             GRAFANA_ENV="sawyer-staging"
           else
