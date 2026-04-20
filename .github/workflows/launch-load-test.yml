@@ -515,6 +515,25 @@ jobs:
             rm -f grafana-dashboard.json
           fi
 
+      - name: Fetch Grafana latency metrics
+        if: steps.results.outputs.results_downloaded == 'true'
+        env:
+          GRAFANA_API_TOKEN: ${{ secrets.GRAFANA_API_TOKEN }}
+        run: |
+          if [ "${{ inputs.environment }}" == "staging" ]; then
+            GRAFANA_ENV="sawyer-staging"
+          else
+            GRAFANA_ENV="sawyer-prod"
+          fi
+
+          python3 scripts/fetch_grafana_metrics.py \
+            --token "$GRAFANA_API_TOKEN" \
+            --environment "$GRAFANA_ENV" \
+            --from-ms "${{ steps.start_test.outputs.start_time_ms }}" \
+            --to-ms "${{ steps.results.outputs.end_time_ms }}" \
+            --output grafana-metrics.json \
+          || echo "⚠️  Grafana metrics fetch failed — latency will fall back to Locust values"
+
       - name: Upload results to S3
         id: upload_s3
         if: steps.results.outputs.results_downloaded == 'true'
@@ -569,6 +588,7 @@ jobs:
           [ -f grafana-nginx.png ] && aws s3 cp grafana-nginx.png "s3://sawyer-load-test-results/${S3_PATH}/grafana-nginx.png" && echo "✓ Grafana Nginx screenshot uploaded"
           [ -f grafana-dashboard-full.png ] && aws s3 cp grafana-dashboard-full.png "s3://sawyer-load-test-results/${S3_PATH}/grafana-dashboard-full.png" && echo "✓ Grafana full dashboard screenshot uploaded"
           [ -f grafana-dashboard.json ] && aws s3 cp grafana-dashboard.json "s3://sawyer-load-test-results/${S3_PATH}/grafana-dashboard.json" && echo "✓ Grafana dashboard definition uploaded"
+          [ -f grafana-metrics.json ] && aws s3 cp grafana-metrics.json "s3://sawyer-load-test-results/${S3_PATH}/grafana-metrics.json" && echo "✓ Grafana latency metrics uploaded"
 
           echo "✓ Results uploaded to S3"
           echo "s3_path=${S3_PATH}" >> $GITHUB_OUTPUT
@@ -599,7 +619,9 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
 
           if [ -f results.csv ]; then
-            python3 scripts/parse_locust_results.py >> $GITHUB_STEP_SUMMARY
+            GRAFANA_ARGS=""
+            [ -f grafana-metrics.json ] && GRAFANA_ARGS="--grafana-metrics grafana-metrics.json"
+            python3 scripts/parse_locust_results.py $GRAFANA_ARGS >> $GITHUB_STEP_SUMMARY
           fi
 
       - name: Scale down infrastructure via API
