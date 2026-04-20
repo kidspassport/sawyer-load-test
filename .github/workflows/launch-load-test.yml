@@ -516,6 +516,7 @@ jobs:
           fi
 
       - name: Upload results to S3
+        id: upload_s3
         if: steps.results.outputs.results_downloaded == 'true'
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -594,15 +595,63 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "📊 **Results Storage**" >> $GITHUB_STEP_SUMMARY
           echo "- GitHub Artifacts: Available in workflow artifacts" >> $GITHUB_STEP_SUMMARY
-          echo "- S3 Bucket: \`s3://sawyer-load-test-results/${{ steps.results.outputs.s3_path }}/\`" >> $GITHUB_STEP_SUMMARY
+          echo "- S3 Bucket: \`s3://sawyer-load-test-results/${{ steps.upload_s3.outputs.s3_path }}/\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Quick stats from results:" >> $GITHUB_STEP_SUMMARY
 
-          # Show summary from CSV
           if [ -f results.csv ]; then
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            head -20 results.csv >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            python3 - <<'PYEOF' >> $GITHUB_STEP_SUMMARY
+import csv, sys
+
+rows = []
+with open('results.csv', newline='') as f:
+    for row in csv.DictReader(f):
+        rows.append(row)
+
+aggr     = next((r for r in rows if r['Name'] == 'Aggregated'), None)
+endpoints = [r for r in rows if r['Name'] != 'Aggregated']
+
+if not aggr:
+    print("⚠️ Could not find Aggregated row in results CSV")
+    sys.exit(0)
+
+total     = int(aggr['Request Count'] or 0)
+fails     = int(aggr['Failure Count'] or 0)
+fail_rate = (fails / total * 100) if total > 0 else 0
+median    = aggr['Median Response Time']
+p95       = aggr['95%']
+p99       = aggr['99%']
+rps       = aggr['Requests/s']
+
+if fails == 0:
+    status = "✅ All requests succeeded"
+elif fail_rate < 1:
+    status = f"⚠️ Low failure rate ({fail_rate:.1f}%)"
+else:
+    status = f"❌ High failure rate ({fail_rate:.1f}%) — investigation needed"
+
+print(f"### {status}")
+print()
+print("| Metric | Value |")
+print("|--------|-------|")
+print(f"| Total Requests | {total:,} |")
+print(f"| Failures | {fails:,} ({fail_rate:.1f}%) |")
+print(f"| Throughput | {rps} req/s |")
+print(f"| Median (p50) | {median} ms |")
+print(f"| 95th Percentile | {p95} ms |")
+print(f"| 99th Percentile | {p99} ms |")
+
+if endpoints:
+    print()
+    print("### 📋 Per-Endpoint Breakdown")
+    print()
+    print("| Type | Endpoint | Requests | Failures | Median | p95 | p99 | RPS |")
+    print("|------|----------|----------|----------|--------|-----|-----|-----|")
+    for r in endpoints:
+        ef   = int(r['Failure Count'] or 0)
+        flag = " ⚠️" if ef > 0 else ""
+        reqs = int(r['Request Count'] or 0)
+        print(f"| {r['Type']} | {r['Name']}{flag} | {reqs:,} | {ef:,} | {r['Median Response Time']} ms | {r['95%']} ms | {r['99%']} ms | {r['Requests/s']} |")
+PYEOF
           fi
 
       - name: Scale down infrastructure via API
