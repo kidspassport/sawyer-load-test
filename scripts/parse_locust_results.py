@@ -85,22 +85,6 @@ def main():
     print(f"| 95th Percentile _{latency_source}_ | {p95} ms |")
     print(f"| 99th Percentile _{latency_source}_ | {p99} ms |")
 
-    if endpoints:
-        print()
-        print("### 📋 Per-Endpoint Breakdown")
-        print()
-        print("| Type | Endpoint | Requests | Failures | Median | p95 | p99 | RPS |")
-        print("|------|----------|----------|----------|--------|-----|-----|-----|")
-        for r in endpoints:
-            ef = int(r["Failure Count"] or 0)
-            flag = " ⚠️" if ef > 0 else ""
-            reqs = int(r["Request Count"] or 0)
-            print(
-                f"| {r['Type']} | {r['Name']}{flag} | {reqs:,} | {ef:,} "
-                f"| {r['Median Response Time']} ms | {r['95%']} ms "
-                f"| {r['99%']} ms | {r['Requests/s']} |"
-            )
-
 
 if __name__ == "__main__":
     main()

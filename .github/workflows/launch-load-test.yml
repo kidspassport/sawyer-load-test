@@ -526,13 +526,22 @@ jobs:
             GRAFANA_ENV="sawyer-prod"
           fi
 
-          python3 scripts/fetch_grafana_metrics.py \
-            --token "$GRAFANA_API_TOKEN" \
-            --environment "$GRAFANA_ENV" \
-            --from-ms "${{ steps.start_test.outputs.start_time_ms }}" \
-            --to-ms "${{ steps.results.outputs.end_time_ms }}" \
-            --output grafana-metrics.json \
-          || echo "⚠️  Grafana metrics fetch failed — latency will fall back to Locust values"
+          FROM_MS="${{ steps.start_test.outputs.start_time_ms }}"
+          TO_MS="${{ steps.results.outputs.end_time_ms }}"
+
+          if [ -z "$FROM_MS" ] || [ -z "$TO_MS" ]; then
+            echo "⚠️  Missing timestamps (from=$FROM_MS to=$TO_MS) — skipping Grafana metrics"
+          else
+            echo "Fetching Nginx latency for window: ${FROM_MS} → ${TO_MS}  env=${GRAFANA_ENV}"
+            python3 scripts/fetch_grafana_metrics.py \
+              --token "$GRAFANA_API_TOKEN" \
+              --environment "$GRAFANA_ENV" \
+              --from-ms "$FROM_MS" \
+              --to-ms "$TO_MS" \
+              --output grafana-metrics.json \
+            && cat grafana-metrics.json \
+            || echo "⚠️  Grafana metrics fetch failed (see error above) — latency will fall back to Locust values"
+          fi
 
       - name: Upload results to S3
         id: upload_s3
