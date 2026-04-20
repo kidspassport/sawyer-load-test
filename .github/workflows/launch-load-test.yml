@@ -468,18 +468,39 @@ jobs:
           START_MS="${{ steps.start_test.outputs.start_time_ms }}"
           END_MS="${{ steps.results.outputs.end_time_ms }}"
 
-          echo "📊 Fetching Grafana data for time window: ${START_MS} to ${END_MS}"
+          # Map workflow environment to Grafana template variable value
+          if [ "${{ inputs.environment }}" == "staging" ]; then
+            GRAFANA_ENV="sawyer-staging"
+          else
+            GRAFANA_ENV="sawyer-prod"
+          fi
 
-          echo "📸 Fetching dashboard screenshot..."
-          SCREENSHOT_CODE=$(curl -s -o grafana-dashboard.png -w "%{http_code}" \
+          echo "📊 Fetching Grafana data for time window: ${START_MS} to ${END_MS} (env: ${GRAFANA_ENV})"
+
+          BASE_PARAMS="orgId=1&from=${START_MS}&to=${END_MS}&tz=UTC&var-environment=${GRAFANA_ENV}"
+
+          echo "📸 Fetching Nginx panels screenshot (1920×1080)..."
+          SCREENSHOT_CODE=$(curl -s -o grafana-nginx.png -w "%{http_code}" \
             -H "Authorization: Bearer $GRAFANA_API_TOKEN" \
-            "${GRAFANA_URL}/render/d/${DASHBOARD_UID}/monitoring-dashboard?orgId=1&from=${START_MS}&to=${END_MS}&width=1920&height=1080&tz=UTC")
+            "${GRAFANA_URL}/render/d/${DASHBOARD_UID}/monitoring-dashboard?${BASE_PARAMS}&width=1920&height=1080")
 
           if [ "$SCREENSHOT_CODE" == "200" ]; then
-            echo "✓ Screenshot downloaded ($(du -h grafana-dashboard.png | cut -f1))"
+            echo "✓ Nginx screenshot downloaded ($(du -h grafana-nginx.png | cut -f1))"
           else
-            echo "⚠️  Screenshot failed (HTTP $SCREENSHOT_CODE)"
-            rm -f grafana-dashboard.png
+            echo "⚠️  Nginx screenshot failed (HTTP $SCREENSHOT_CODE)"
+            rm -f grafana-nginx.png
+          fi
+
+          echo "📸 Fetching full dashboard screenshot (1920×3000)..."
+          FULL_CODE=$(curl -s -o grafana-dashboard-full.png -w "%{http_code}" \
+            -H "Authorization: Bearer $GRAFANA_API_TOKEN" \
+            "${GRAFANA_URL}/render/d/${DASHBOARD_UID}/monitoring-dashboard?${BASE_PARAMS}&width=1920&height=3000")
+
+          if [ "$FULL_CODE" == "200" ]; then
+            echo "✓ Full dashboard screenshot downloaded ($(du -h grafana-dashboard-full.png | cut -f1))"
+          else
+            echo "⚠️  Full dashboard screenshot failed (HTTP $FULL_CODE)"
+            rm -f grafana-dashboard-full.png
           fi
 
           echo "📋 Fetching dashboard definition..."
@@ -544,7 +565,8 @@ jobs:
           aws s3 cp metadata.json "s3://sawyer-load-test-results/${S3_PATH}/metadata.json"
 
           # Upload Grafana data if available
-          [ -f grafana-dashboard.png ] && aws s3 cp grafana-dashboard.png "s3://sawyer-load-test-results/${S3_PATH}/grafana-dashboard.png" && echo "✓ Grafana screenshot uploaded"
+          [ -f grafana-nginx.png ] && aws s3 cp grafana-nginx.png "s3://sawyer-load-test-results/${S3_PATH}/grafana-nginx.png" && echo "✓ Grafana Nginx screenshot uploaded"
+          [ -f grafana-dashboard-full.png ] && aws s3 cp grafana-dashboard-full.png "s3://sawyer-load-test-results/${S3_PATH}/grafana-dashboard-full.png" && echo "✓ Grafana full dashboard screenshot uploaded"
           [ -f grafana-dashboard.json ] && aws s3 cp grafana-dashboard.json "s3://sawyer-load-test-results/${S3_PATH}/grafana-dashboard.json" && echo "✓ Grafana dashboard definition uploaded"
 
           echo "✓ Results uploaded to S3"
