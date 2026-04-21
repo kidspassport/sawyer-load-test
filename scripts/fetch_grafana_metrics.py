@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Fetch Nginx latency percentiles (p50/p95/p99) from Grafana Cloud Prometheus.
 
+Uses a range query over the full test window and averages the resulting time
+series — more robust than an instant query which can miss sparse scrape intervals.
+
+Falls back to app-tier metrics (non-nginx) if nginx returns no data.
+
 Writes a JSON file like:
   {"p50_ms": 320.5, "p95_ms": 681.0, "p99_ms": 1680.2,
    "source": "grafana-nginx", "environment": "sawyer-staging"}
@@ -15,27 +20,72 @@ import urllib.request
 GRAFANA_URL = "https://daysmartsawyer.grafana.net"
 DATASOURCE_UID = "grafanacloud-prom"
 
-# Nginx latency queries — $__rate_interval replaced at runtime with actual test duration
-QUERIES = {
-    "p50_ms": (
-        "histogram_quantile(0.5, sum(rate("
-        "traces_span_metrics_duration_seconds{{"
-        'environment="{env}", heroku_app_name=~".*nginx.*"'
-        "}}[{interval}s])))"
-    ),
-    "p95_ms": (
-        "histogram_quantile(0.95, sum(rate("
-        "traces_span_metrics_duration_seconds{{"
-        'environment="{env}", heroku_app_name=~".*nginx.*"'
-        "}}[{interval}s])))"
-    ),
-    "p99_ms": (
-        "histogram_quantile(0.99, sum(rate("
-        "traces_span_metrics_duration_seconds{{"
-        'environment="{env}", heroku_app_name=~".*nginx.*"'
-        "}}[{interval}s])))"
-    ),
+QUERY_TEMPLATES = {
+    "nginx": {
+        "p50_ms": "histogram_quantile(0.5, sum(rate(traces_span_metrics_duration_seconds{{environment=\"{env}\", heroku_app_name=~\".*nginx.*\"}}[{interval}s])))",
+        "p95_ms": "histogram_quantile(0.95, sum(rate(traces_span_metrics_duration_seconds{{environment=\"{env}\", heroku_app_name=~\".*nginx.*\"}}[{interval}s])))",
+        "p99_ms": "histogram_quantile(0.99, sum(rate(traces_span_metrics_duration_seconds{{environment=\"{env}\", heroku_app_name=~\".*nginx.*\"}}[{interval}s])))",
+    },
+    "app": {
+        "p50_ms": "histogram_quantile(0.5, sum(rate(traces_span_metrics_duration_seconds{{environment=\"{env}\", heroku_app_name!~\".*nginx.*\"}}[{interval}s])))",
+        "p95_ms": "histogram_quantile(0.95, sum(rate(traces_span_metrics_duration_seconds{{environment=\"{env}\", heroku_app_name!~\".*nginx.*\"}}[{interval}s])))",
+        "p99_ms": "histogram_quantile(0.99, sum(rate(traces_span_metrics_duration_seconds{{environment=\"{env}\", heroku_app_name!~\".*nginx.*\"}}[{interval}s])))",
+    },
 }
+
+
+def query_grafana(token, queries, from_ms, to_ms, step_s):
+    """POST a range query to Grafana and return the raw results dict."""
+    payload = {
+        "queries": queries,
+        "from": str(from_ms),
+        "to": str(to_ms),
+    }
+    req = urllib.request.Request(
+        f"{GRAFANA_URL}/api/ds/query",
+        data=json.dumps(payload).encode(),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req) as resp:
+            return json.load(resp)
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        print(f"ERROR: Grafana API returned HTTP {e.code}: {body}", file=sys.stderr)
+        sys.exit(1)
+    except urllib.error.URLError as e:
+        print(f"ERROR: Could not reach Grafana: {e.reason}", file=sys.stderr)
+        sys.exit(1)
+
+
+def extract_average_ms(data, ref_id):
+    """Average all values in a range query time series and convert s → ms."""
+    try:
+        values = data["results"][ref_id]["frames"][0]["data"]["values"][1]
+        non_null = [v for v in values if v is not None]
+        if not non_null:
+            return None
+        return round((sum(non_null) / len(non_null)) * 1000, 1)
+    except (KeyError, IndexError, TypeError, ZeroDivisionError):
+        return None
+
+
+def build_queries(templates, env, interval_s, step_s):
+    return [
+        {
+            "datasource": {"type": "prometheus", "uid": DATASOURCE_UID},
+            "expr": tmpl.format(env=env, interval=interval_s),
+            "range": True,
+            "instant": False,
+            "intervalMs": step_s * 1000,
+            "refId": ref_id,
+        }
+        for ref_id, tmpl in templates.items()
+    ]
 
 
 def main():
@@ -47,64 +97,40 @@ def main():
     parser.add_argument("--output", default="grafana-metrics.json", help="Output file path")
     args = parser.parse_args()
 
-    # Use actual test duration as the Prometheus rate interval (min 60s)
     duration_s = max((args.to_ms - args.from_ms) // 1000, 60)
+    step_s = max(duration_s // 60, 15)  # ~60 data points, min 15s step
 
-    queries = [
-        {
-            "datasource": {"type": "prometheus", "uid": DATASOURCE_UID},
-            "expr": tmpl.format(env=args.environment, interval=duration_s),
-            "instant": True,
-            "refId": ref_id,
-        }
-        for ref_id, tmpl in QUERIES.items()
-    ]
+    print(f"Query window: {duration_s}s  rate_interval: {duration_s}s  step: {step_s}s", file=sys.stderr)
 
-    payload = {
-        "queries": queries,
-        "from": str(args.from_ms),
-        "to": str(args.to_ms),
+    # Try nginx first, fall back to app-tier if no data
+    for source, templates in QUERY_TEMPLATES.items():
+        queries = build_queries(templates, args.environment, duration_s, step_s)
+        data = query_grafana(args.token, queries, args.from_ms, args.to_ms, step_s)
+
+        results = {ref_id: extract_average_ms(data, ref_id) for ref_id in templates}
+
+        if any(v is not None for v in results.values()):
+            print(f"✓ Using {source} metrics", file=sys.stderr)
+            break
+
+        print(f"⚠️  No data from {source} metrics, trying next source...", file=sys.stderr)
+    else:
+        print("⚠️  All metric sources returned no data", file=sys.stderr)
+
+    output = {
+        "source": f"grafana-{source}",
+        "environment": args.environment,
+        "from_ms": args.from_ms,
+        "to_ms": args.to_ms,
+        **results,
     }
 
-    req = urllib.request.Request(
-        f"{GRAFANA_URL}/api/ds/query",
-        data=json.dumps(payload).encode(),
-        headers={
-            "Authorization": f"Bearer {args.token}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-
-    try:
-        with urllib.request.urlopen(req) as resp:
-            data = json.load(resp)
-    except urllib.error.HTTPError as e:
-        body = e.read().decode()
-        print(f"ERROR: Grafana API returned HTTP {e.code}: {body}", file=sys.stderr)
-        sys.exit(1)
-    except urllib.error.URLError as e:
-        print(f"ERROR: Could not reach Grafana: {e.reason}", file=sys.stderr)
-        sys.exit(1)
-
-    results = {"source": "grafana-nginx", "environment": args.environment,
-               "from_ms": args.from_ms, "to_ms": args.to_ms}
-
-    for ref_id in QUERIES:
-        try:
-            # instant query → one frame, values = [[timestamps...], [values...]]
-            value = data["results"][ref_id]["frames"][0]["data"]["values"][1][0]
-            # metric is in seconds — convert to ms
-            results[ref_id] = round(value * 1000, 1) if value is not None else None
-        except (KeyError, IndexError, TypeError):
-            results[ref_id] = None
-
     with open(args.output, "w") as f:
-        json.dump(results, f, indent=2)
+        json.dump(output, f, indent=2)
 
-    p50, p95, p99 = results["p50_ms"], results["p95_ms"], results["p99_ms"]
-    print(f"✓ Grafana Nginx latency: p50={p50}ms  p95={p95}ms  p99={p99}ms")
+    print(f"✓ Grafana latency ({source}): p50={results['p50_ms']}ms  p95={results['p95_ms']}ms  p99={results['p99_ms']}ms")
 
 
 if __name__ == "__main__":
     main()
+
