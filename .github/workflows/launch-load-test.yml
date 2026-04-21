@@ -638,6 +638,22 @@ jobs:
             python3 scripts/parse_locust_results.py $GRAFANA_ARGS >> $GITHUB_STEP_SUMMARY
           fi
 
+      - name: Analyze results with AI
+        if: steps.results.outputs.results_downloaded == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "<details><summary>🤖 AI Analysis (gpt-4o-mini)</summary>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          python3 scripts/analyze_results.py --token "$GITHUB_TOKEN" >> $GITHUB_STEP_SUMMARY \
+            || echo "⚠️ AI analysis unavailable" >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "</details>" >> $GITHUB_STEP_SUMMARY
+
       - name: Scale down infrastructure via API
         if: always()  # Run cleanup even if tests fail
         run: |
