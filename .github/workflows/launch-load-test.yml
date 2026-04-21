@@ -524,7 +524,6 @@ jobs:
           sleep 180
           echo "✓ Done waiting"
 
-          # Prometheus environment label is 'staging'/'production' (not the Heroku app name)
           if [ "${{ inputs.environment }}" == "staging" ]; then
             GRAFANA_ENV="staging"
           else
