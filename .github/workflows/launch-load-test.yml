@@ -616,10 +616,6 @@ jobs:
 
       - name: Display test summary
         if: steps.results.outputs.results_downloaded == 'true'
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: us-east-1
         run: |
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "---" >> $GITHUB_STEP_SUMMARY
@@ -640,7 +636,6 @@ jobs:
 
           S3_PATH="${{ steps.upload_s3.outputs.s3_path }}"
           BUCKET="sawyer-load-test-results"
-          PRESIGN_EXPIRY=604800  # 7 days
 
           declare -A PANEL_LABELS=(
             [grafana-panel-throughput.png]="📈 Throughput"
@@ -658,14 +653,12 @@ jobs:
                 echo "" >> $GITHUB_STEP_SUMMARY
               fi
               LABEL="${PANEL_LABELS[$panel_file]}"
-              URL=$(aws s3 presign "s3://${BUCKET}/${S3_PATH}/${panel_file}" --expires-in $PRESIGN_EXPIRY 2>/dev/null)
-              if [ -n "$URL" ]; then
-                echo "**${LABEL}**" >> $GITHUB_STEP_SUMMARY
-                echo "" >> $GITHUB_STEP_SUMMARY
-                echo "![${LABEL}](${URL})" >> $GITHUB_STEP_SUMMARY
-                echo "" >> $GITHUB_STEP_SUMMARY
-                PANELS_ADDED=$((PANELS_ADDED + 1))
-              fi
+              URL="https://${BUCKET}.s3.amazonaws.com/${S3_PATH}/${panel_file}"
+              echo "**${LABEL}**" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "![${LABEL}](${URL})" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              PANELS_ADDED=$((PANELS_ADDED + 1))
             fi
           done
 
