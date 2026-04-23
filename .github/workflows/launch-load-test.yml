@@ -637,6 +637,16 @@ jobs:
             python3 scripts/parse_locust_results.py $GRAFANA_ARGS >> $GITHUB_STEP_SUMMARY
           fi
 
+      - name: Update run history
+        if: steps.results.outputs.results_downloaded == 'true'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          python3 scripts/update_history.py --bucket sawyer-load-test-results \
+            || echo "⚠️  History update failed — AI analysis will run without historical context"
+
       - name: Analyze results with AI
         if: steps.results.outputs.results_downloaded == 'true'
         env:

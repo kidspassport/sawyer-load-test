@@ -35,14 +35,50 @@ def load_file(path):
         return None
 
 
-def load_baseline(baselines, environment, scenario):
-    """Return the baseline dict for the given env+scenario, or None."""
-    if not baselines:
+def compute_history_stats(history, environment, scenario, current_users):
+    """Return stats dict from prior matching runs, or None if too few runs."""
+    if not history:
         return None
-    return baselines.get(environment, {}).get(scenario)
+
+    # Match on env + scenario; group by similar user count (within 20%)
+    try:
+        cu = float(current_users)
+    except (TypeError, ValueError):
+        cu = None
+
+    runs = []
+    for r in history:
+        if r.get("environment") != environment or r.get("scenario") != scenario:
+            continue
+        if r.get("p50_ms") is None:  # skip runs without latency data
+            continue
+        if cu is not None:
+            try:
+                ratio = float(r["users"]) / cu
+                if not (0.8 <= ratio <= 1.2):
+                    continue
+            except (TypeError, ValueError, ZeroDivisionError):
+                pass
+        runs.append(r)
+
+    if not runs:
+        return None
+
+    def avg(key):
+        vals = [r[key] for r in runs if r.get(key) is not None]
+        return round(sum(vals) / len(vals), 1) if vals else None
+
+    return {
+        "run_count": len(runs),
+        "avg_p50_ms": avg("p50_ms"),
+        "avg_p95_ms": avg("p95_ms"),
+        "avg_p99_ms": avg("p99_ms"),
+        "avg_fail_rate_pct": avg("fail_rate_pct"),
+        "recent_runs": sorted(runs, key=lambda r: r.get("timestamp", ""), reverse=True)[:5],
+    }
 
 
-def build_prompt(metadata, grafana, results_csv, stats_csv, baseline):
+def build_prompt(metadata, grafana, results_csv, stats_csv, history_stats):
     env = metadata.get("environment", "unknown") if metadata else "unknown"
     scenario = metadata.get("scenario", "unknown") if metadata else "unknown"
     config = metadata.get("configuration", {}) if metadata else {}
@@ -77,40 +113,37 @@ def build_prompt(metadata, grafana, results_csv, stats_csv, baseline):
         "",
     ]
 
-    if baseline:
-        baseline_users = baseline.get("users")
-        current_users = config.get("users")
-        try:
-            user_ratio = float(current_users) / float(baseline_users) if baseline_users and current_users else None
-        except (ValueError, TypeError):
-            user_ratio = None
-
+    if history_stats:
+        n = history_stats["run_count"]
         lines += [
-            "## Established Baselines",
-            f"- Baseline measured at: {baseline_users} users",
-            f"- Current run: {current_users} users",
-        ]
-        if user_ratio is not None and abs(user_ratio - 1.0) > 0.1:
-            lines.append(
-                f"- Load difference: {user_ratio:.1f}x — latency thresholds below were established "
-                f"at {baseline_users} users. Proportionally higher latency is expected at {current_users} users "
-                "and should not be treated as a regression."
-            )
-        lines += [
-            f"- p50 baseline: {baseline.get('p50_ms')} ms",
-            f"- p95 baseline: {baseline.get('p95_ms')} ms",
-            f"- p99 baseline: {baseline.get('p99_ms')} ms",
-            f"- Failure rate baseline: {baseline.get('fail_rate_pct')}%",
+            f"## Historical Baselines (averaged from {n} prior runs with similar user load)",
+            f"- avg p50: {history_stats['avg_p50_ms']} ms",
+            f"- avg p95: {history_stats['avg_p95_ms']} ms",
+            f"- avg p99: {history_stats['avg_p99_ms']} ms",
+            f"- avg failure rate: {history_stats['avg_fail_rate_pct']}%",
             "",
-            "Use these baselines to calibrate your assessment. "
-            "Values within baseline are healthy — only flag latency or failure rate as a concern "
-            "if it materially exceeds the baseline after accounting for any difference in user load.",
+        ]
+        recent = history_stats["recent_runs"]
+        if recent:
+            lines.append("Recent runs (most recent first):")
+            for r in recent:
+                lines.append(
+                    f"- {r.get('timestamp', 'unknown')[:10]}  "
+                    f"{r.get('users')} users  "
+                    f"p50={r.get('p50_ms')}ms  p95={r.get('p95_ms')}ms  p99={r.get('p99_ms')}ms  "
+                    f"failures={r.get('fail_rate_pct')}%"
+                )
+        lines += [
+            "",
+            "Use these historical averages to calibrate your assessment. "
+            "Only flag latency or failure rate as a concern if it materially exceeds the historical average. "
+            "Runs were filtered to similar user counts (within 20%) so load differences are already accounted for.",
             "",
         ]
     else:
         lines += [
-            "## Baselines",
-            "No established baseline for this environment+scenario yet. "
+            "## Historical Baselines",
+            "No prior runs with matching environment, scenario, and similar user count. "
             "Assess on general web application performance standards.",
             "",
         ]
@@ -151,9 +184,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--token", required=True, help="GitHub token (GITHUB_TOKEN)")
     parser.add_argument(
-        "--baselines",
-        default="config/baselines.json",
-        help="Path to baselines config (default: config/baselines.json)",
+        "--history",
+        default="history.json",
+        help="Path to run history JSON (default: history.json)",
     )
     args = parser.parse_args()
 
@@ -161,7 +194,7 @@ def main():
     grafana = load_json("grafana-metrics.json")
     results_csv = load_file("results.csv")
     stats_csv = load_file("results_stats.csv")
-    baselines = load_json(args.baselines)
+    history = load_json(args.history)
 
     if not results_csv and not grafana:
         print("⚠️ No results data available for AI analysis", file=sys.stderr)
@@ -169,9 +202,10 @@ def main():
 
     env = (metadata or {}).get("environment", "unknown")
     scenario = (metadata or {}).get("scenario", "unknown")
-    baseline = load_baseline(baselines, env, scenario)
+    current_users = (metadata or {}).get("configuration", {}).get("users")
+    history_stats = compute_history_stats(history, env, scenario, current_users)
 
-    prompt = build_prompt(metadata, grafana, results_csv, stats_csv, baseline)
+    prompt = build_prompt(metadata, grafana, results_csv, stats_csv, history_stats)
 
     payload = {
         "model": MODEL,
