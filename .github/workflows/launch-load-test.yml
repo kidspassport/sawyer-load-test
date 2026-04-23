@@ -479,29 +479,25 @@ jobs:
 
           BASE_PARAMS="orgId=1&from=${START_MS}&to=${END_MS}&tz=UTC&var-environment=${GRAFANA_ENV}"
 
-          echo "📸 Fetching Nginx panels screenshot (1920×1080)..."
-          SCREENSHOT_CODE=$(curl -s -o grafana-nginx.png -w "%{http_code}" \
-            -H "Authorization: Bearer $GRAFANA_API_TOKEN" \
-            "${GRAFANA_URL}/render/d/${DASHBOARD_UID}/monitoring-dashboard?${BASE_PARAMS}&width=1920&height=1080")
+          fetch_panel() {
+            local panel_id="$1" label="$2" file="$3"
+            echo "📸 Fetching ${label} (panel ${panel_id})..."
+            local code
+            code=$(curl -s -o "${file}" -w "%{http_code}" \
+              -H "Authorization: Bearer $GRAFANA_API_TOKEN" \
+              "${GRAFANA_URL}/render/d-solo/${DASHBOARD_UID}/monitoring-dashboard?${BASE_PARAMS}&panelId=${panel_id}&width=1000&height=350")
+            if [ "$code" == "200" ]; then
+              echo "✓ ${label} downloaded ($(du -h ${file} | cut -f1))"
+            else
+              echo "⚠️  ${label} failed (HTTP $code)"
+              rm -f "${file}"
+            fi
+          }
 
-          if [ "$SCREENSHOT_CODE" == "200" ]; then
-            echo "✓ Nginx screenshot downloaded ($(du -h grafana-nginx.png | cut -f1))"
-          else
-            echo "⚠️  Nginx screenshot failed (HTTP $SCREENSHOT_CODE)"
-            rm -f grafana-nginx.png
-          fi
-
-          echo "📸 Fetching full dashboard screenshot (1920×3000)..."
-          FULL_CODE=$(curl -s -o grafana-dashboard-full.png -w "%{http_code}" \
-            -H "Authorization: Bearer $GRAFANA_API_TOKEN" \
-            "${GRAFANA_URL}/render/d/${DASHBOARD_UID}/monitoring-dashboard?${BASE_PARAMS}&width=1920&height=3000")
-
-          if [ "$FULL_CODE" == "200" ]; then
-            echo "✓ Full dashboard screenshot downloaded ($(du -h grafana-dashboard-full.png | cut -f1))"
-          else
-            echo "⚠️  Full dashboard screenshot failed (HTTP $FULL_CODE)"
-            rm -f grafana-dashboard-full.png
-          fi
+          fetch_panel 35 "Throughput"            grafana-panel-throughput.png
+          fetch_panel 38 "Latency (time series)" grafana-panel-latency-ts.png
+          fetch_panel 39 "Latency (p50/p95/p99)" grafana-panel-latency-pct.png
+          fetch_panel 16 "CPU usage"             grafana-panel-cpu.png
 
           echo "📋 Fetching dashboard definition..."
           DASHBOARD_CODE=$(curl -s -o grafana-dashboard.json -w "%{http_code}" \
@@ -598,8 +594,9 @@ jobs:
           aws s3 cp metadata.json "s3://sawyer-load-test-results/${S3_PATH}/metadata.json"
 
           # Upload Grafana data if available
-          [ -f grafana-nginx.png ] && aws s3 cp grafana-nginx.png "s3://sawyer-load-test-results/${S3_PATH}/grafana-nginx.png" && echo "✓ Grafana Nginx screenshot uploaded"
-          [ -f grafana-dashboard-full.png ] && aws s3 cp grafana-dashboard-full.png "s3://sawyer-load-test-results/${S3_PATH}/grafana-dashboard-full.png" && echo "✓ Grafana full dashboard screenshot uploaded"
+          for panel_file in grafana-panel-throughput.png grafana-panel-latency-ts.png grafana-panel-latency-pct.png grafana-panel-cpu.png; do
+            [ -f "$panel_file" ] && aws s3 cp "$panel_file" "s3://sawyer-load-test-results/${S3_PATH}/${panel_file}" && echo "✓ ${panel_file} uploaded"
+          done
           [ -f grafana-dashboard.json ] && aws s3 cp grafana-dashboard.json "s3://sawyer-load-test-results/${S3_PATH}/grafana-dashboard.json" && echo "✓ Grafana dashboard definition uploaded"
           [ -f grafana-metrics.json ] && aws s3 cp grafana-metrics.json "s3://sawyer-load-test-results/${S3_PATH}/grafana-metrics.json" && echo "✓ Grafana latency metrics uploaded"
 
@@ -619,6 +616,10 @@ jobs:
 
       - name: Display test summary
         if: steps.results.outputs.results_downloaded == 'true'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
         run: |
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "---" >> $GITHUB_STEP_SUMMARY
@@ -636,6 +637,37 @@ jobs:
             [ -f grafana-metrics.json ] && GRAFANA_ARGS="--grafana-metrics grafana-metrics.json"
             python3 scripts/parse_locust_results.py $GRAFANA_ARGS >> $GITHUB_STEP_SUMMARY
           fi
+
+          S3_PATH="${{ steps.upload_s3.outputs.s3_path }}"
+          BUCKET="sawyer-load-test-results"
+          PRESIGN_EXPIRY=604800  # 7 days
+
+          declare -A PANEL_LABELS=(
+            [grafana-panel-throughput.png]="📈 Throughput"
+            [grafana-panel-latency-ts.png]="⏱ Latency (time series)"
+            [grafana-panel-latency-pct.png]="📊 Latency Percentiles (p50 / p95 / p99)"
+            [grafana-panel-cpu.png]="🖥 CPU Usage"
+          )
+
+          PANELS_ADDED=0
+          for panel_file in grafana-panel-throughput.png grafana-panel-latency-ts.png grafana-panel-latency-pct.png grafana-panel-cpu.png; do
+            if [ -f "$panel_file" ]; then
+              if [ $PANELS_ADDED -eq 0 ]; then
+                echo "" >> $GITHUB_STEP_SUMMARY
+                echo "### 📷 Grafana Panels" >> $GITHUB_STEP_SUMMARY
+                echo "" >> $GITHUB_STEP_SUMMARY
+              fi
+              LABEL="${PANEL_LABELS[$panel_file]}"
+              URL=$(aws s3 presign "s3://${BUCKET}/${S3_PATH}/${panel_file}" --expires-in $PRESIGN_EXPIRY 2>/dev/null)
+              if [ -n "$URL" ]; then
+                echo "**${LABEL}**" >> $GITHUB_STEP_SUMMARY
+                echo "" >> $GITHUB_STEP_SUMMARY
+                echo "![${LABEL}](${URL})" >> $GITHUB_STEP_SUMMARY
+                echo "" >> $GITHUB_STEP_SUMMARY
+                PANELS_ADDED=$((PANELS_ADDED + 1))
+              fi
+            fi
+          done
 
       - name: Update run history
         if: steps.results.outputs.results_downloaded == 'true'
