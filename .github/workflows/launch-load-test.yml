@@ -1,6 +1,10 @@
 name: Launch Load Test Swarm
 
 on:
+  schedule:
+    # Mondays and Wednesdays at 11 PM Eastern (03:00 UTC during EDT, 04:00 UTC during EST)
+    - cron: '0 3 * * 1,3'
+    - cron: '0 4 * * 1,3'
   workflow_dispatch:
     inputs:
       workers:
@@ -37,7 +41,7 @@ on:
       test_duration_minutes:
         description: 'Test duration (minutes)'
         required: true
-        default: '5'
+        default: '15'
         type: number
 
       # Optional Overrides (leave empty to use environment defaults)
@@ -96,6 +100,30 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Resolve effective inputs
+        id: eff
+        run: |
+          # For scheduled runs, use fixed defaults. For manual runs, use dispatch inputs.
+          if [ "${{ github.event_name }}" == "schedule" ]; then
+            echo "environment=staging"      >> $GITHUB_OUTPUT
+            echo "scenario=place_order"     >> $GITHUB_OUTPUT
+            echo "workers=3"               >> $GITHUB_OUTPUT
+            echo "instance_type=t3.medium" >> $GITHUB_OUTPUT
+            echo "max_duration_hours=2"    >> $GITHUB_OUTPUT
+            echo "test_duration_minutes=15" >> $GITHUB_OUTPUT
+            echo "actually_place_orders=true" >> $GITHUB_OUTPUT
+            echo "✓ Scheduled run — using defaults (staging / place_order / 60 min / actually_place_orders=true)"
+          else
+            echo "environment=${{ inputs.environment }}"               >> $GITHUB_OUTPUT
+            echo "scenario=${{ inputs.scenario }}"                     >> $GITHUB_OUTPUT
+            echo "workers=${{ inputs.workers }}"                       >> $GITHUB_OUTPUT
+            echo "instance_type=${{ inputs.instance_type }}"           >> $GITHUB_OUTPUT
+            echo "max_duration_hours=${{ inputs.max_duration_hours }}" >> $GITHUB_OUTPUT
+            echo "test_duration_minutes=${{ inputs.test_duration_minutes }}" >> $GITHUB_OUTPUT
+            echo "actually_place_orders=${{ inputs.actually_place_orders }}" >> $GITHUB_OUTPUT
+            echo "✓ Manual run — using dispatch inputs"
+          fi
+
       - name: Check for existing swarms
         id: check_existing
         env:
@@ -127,7 +155,7 @@ jobs:
         id: test_params
         run: |
           # Set defaults based on environment
-          if [ "${{ inputs.environment }}" == "staging" ]; then
+          if [ "${{ steps.eff.outputs.environment }}" == "staging" ]; then
             DEFAULT_USERS=100
             DEFAULT_SPAWN_RATE=1
             DEFAULT_HOST="https://staging.hisawyer.com"
@@ -135,8 +163,8 @@ jobs:
             DEFAULT_SLUG="pretend-school"
             DEFAULT_MIN_DYNOS=5
             DEFAULT_MAX_DYNOS=15
-            DEFAULT_MIN_ACU=4
-            DEFAULT_MAX_ACU=32
+            DEFAULT_MIN_ACU=12
+            DEFAULT_MAX_ACU=50
             HEROKU_APP="sawyer-staging"
           else
             DEFAULT_USERS=500
@@ -146,8 +174,8 @@ jobs:
             DEFAULT_SLUG="sawyer-engineering-test-provider"
             DEFAULT_MIN_DYNOS=10
             DEFAULT_MAX_DYNOS=30
-            DEFAULT_MIN_ACU=8
-            DEFAULT_MAX_ACU=64
+            DEFAULT_MIN_ACU=25
+            DEFAULT_MAX_ACU=100
             HEROKU_APP="sawyer-prod"
           fi
 
@@ -185,7 +213,7 @@ jobs:
           echo "host=$HOST" >> $GITHUB_OUTPUT
           echo "booking_fee_id=$BOOKING_FEE_ID" >> $GITHUB_OUTPUT
           echo "slug=$SLUG" >> $GITHUB_OUTPUT
-          echo "scenario=${{ inputs.scenario }}" >> $GITHUB_OUTPUT
+          echo "scenario=${{ steps.eff.outputs.scenario }}" >> $GITHUB_OUTPUT
           echo "min_dynos=$MIN_DYNOS" >> $GITHUB_OUTPUT
           echo "max_dynos=$MAX_DYNOS" >> $GITHUB_OUTPUT
           echo "min_acu=$MIN_ACU" >> $GITHUB_OUTPUT
@@ -196,7 +224,7 @@ jobs:
           echo "  Users: $USERS"
           echo "  Spawn Rate: $SPAWN_RATE"
           echo "  Host: $HOST"
-          echo "  Scenario: ${{ inputs.scenario }}"
+          echo "  Scenario: ${{ steps.eff.outputs.scenario }}"
           echo "  Booking Fee ID: $BOOKING_FEE_ID"
           echo "  Slug: $SLUG"
           echo "  Heroku App: $HEROKU_APP"
@@ -204,21 +232,21 @@ jobs:
           echo "  Aurora ACUs: $MIN_ACU-$MAX_ACU"
 
           # Update instance type in launch script
-          sed -i "s/INSTANCE_TYPE=\"t3.medium\"/INSTANCE_TYPE=\"${{ inputs.instance_type }}\"/" launch-swarm.sh
+          sed -i "s/INSTANCE_TYPE=\"t3.medium\"/INSTANCE_TYPE=\"${{ steps.eff.outputs.instance_type }}\"/" launch-swarm.sh
 
           # Update test parameters in setup scripts
-          sed -i "s|--scenario=place_order|--scenario=${{ inputs.scenario }}|g" swarm_scripts/master_setup.sh
+          sed -i "s|--scenario=place_order|--scenario=${{ steps.eff.outputs.scenario }}|g" swarm_scripts/master_setup.sh
           sed -i "s|--slug=pretend-school|--slug=$SLUG|g" swarm_scripts/master_setup.sh
           sed -i "s|--booking_fee_id=306|--booking_fee_id=$BOOKING_FEE_ID|g" swarm_scripts/master_setup.sh
           sed -i "s|--host=https://staging.hisawyer.com|--host=$HOST|g" swarm_scripts/master_setup.sh
 
-          sed -i "s|--scenario=place_order|--scenario=${{ inputs.scenario }}|g" swarm_scripts/worker_setup.sh
+          sed -i "s|--scenario=place_order|--scenario=${{ steps.eff.outputs.scenario }}|g" swarm_scripts/worker_setup.sh
           sed -i "s|--slug=pretend-school|--slug=$SLUG|g" swarm_scripts/worker_setup.sh
           sed -i "s|--booking_fee_id=306|--booking_fee_id=$BOOKING_FEE_ID|g" swarm_scripts/worker_setup.sh
           sed -i "s|--host=https://staging.hisawyer.com|--host=$HOST|g" swarm_scripts/worker_setup.sh
 
           # Add --actually-place-orders flag if enabled
-          if [ "${{ inputs.actually_place_orders }}" == "true" ]; then
+          if [ "${{ steps.eff.outputs.actually_place_orders }}" == "true" ]; then
             echo "⚠️  WARNING: Orders will actually be placed!"
             sed -i "s|--host=|--actually-place-orders --host=|g" swarm_scripts/master_setup.sh
             sed -i "s|--host=|--actually-place-orders --host=|g" swarm_scripts/worker_setup.sh
@@ -256,8 +284,8 @@ jobs:
           fi
 
           # Add 30 minutes of padding to allow for test startup/shutdown
-          SCALE_DURATION=$((${{ inputs.test_duration_minutes }} + 30))
-          echo "Test duration: ${{ inputs.test_duration_minutes }} minutes (scaling for ${SCALE_DURATION} minutes with 30min padding)"
+          SCALE_DURATION=$((${{ steps.eff.outputs.test_duration_minutes }} + 30))
+          echo "Test duration: ${{ steps.eff.outputs.test_duration_minutes }} minutes (scaling for ${SCALE_DURATION} minutes with 30min padding)"
 
           response=$(curl -s -w "\n%{http_code}" -X POST \
             -H "Authorization: Bearer ${{ secrets.LOAD_TEST_API_TOKEN }}" \
@@ -312,10 +340,10 @@ jobs:
           echo "## 🚀 Load Test Swarm Launched!" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Configuration:**" >> $GITHUB_STEP_SUMMARY
-          echo "- Workers: ${{ inputs.workers }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Instance Type: ${{ inputs.instance_type }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Environment: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Max Duration: ${{ inputs.max_duration_hours }} hours" >> $GITHUB_STEP_SUMMARY
+          echo "- Workers: ${{ steps.eff.outputs.workers }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Instance Type: ${{ steps.eff.outputs.instance_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Environment: ${{ steps.eff.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Max Duration: ${{ steps.eff.outputs.max_duration_hours }} hours" >> $GITHUB_STEP_SUMMARY
           echo "- Launch Time: ${{ steps.launch.outputs.launch_time }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Access:**" >> $GITHUB_STEP_SUMMARY
@@ -327,7 +355,7 @@ jobs:
           echo "- Check worker count in top-right of Web UI" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Auto-Termination:**" >> $GITHUB_STEP_SUMMARY
-          echo "- Swarm will auto-terminate in ${{ inputs.max_duration_hours }} hour(s)" >> $GITHUB_STEP_SUMMARY
+          echo "- Swarm will auto-terminate in ${{ steps.eff.outputs.max_duration_hours }} hour(s)" >> $GITHUB_STEP_SUMMARY
           echo "- Or manually terminate with: \`./terminate-swarm.sh\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "---" >> $GITHUB_STEP_SUMMARY
@@ -393,7 +421,7 @@ jobs:
           echo "🚀 Starting load test..."
           echo "  Users: $USERS"
           echo "  Spawn Rate: $SPAWN_RATE"
-          echo "  Duration: ${{ inputs.test_duration_minutes }} minutes"
+          echo "  Duration: ${{ steps.eff.outputs.test_duration_minutes }} minutes"
 
           # Start the swarm via API
           HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
@@ -420,16 +448,16 @@ jobs:
           echo "- Users: $USERS" >> $GITHUB_STEP_SUMMARY
           echo "- Spawn Rate: $SPAWN_RATE users/sec" >> $GITHUB_STEP_SUMMARY
           echo "- Host: ${{ steps.test_params.outputs.host }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Duration: ${{ inputs.test_duration_minutes }} minutes" >> $GITHUB_STEP_SUMMARY
-          echo "- Actually Place Orders: ${{ inputs.actually_place_orders }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Duration: ${{ steps.eff.outputs.test_duration_minutes }} minutes" >> $GITHUB_STEP_SUMMARY
+          echo "- Actually Place Orders: ${{ steps.eff.outputs.actually_place_orders }}" >> $GITHUB_STEP_SUMMARY
           echo "- Started: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
 
       - name: Monitor test execution
         run: |
           MASTER_IP="${{ steps.launch.outputs.master_ip }}"
-          DURATION_SECONDS=$((60 * ${{ inputs.test_duration_minutes }}))
+          DURATION_SECONDS=$((60 * ${{ steps.eff.outputs.test_duration_minutes }}))
 
-          echo "⏱️  Test will run for ${{ inputs.test_duration_minutes }} minute(s)..."
+          echo "⏱️  Test will run for ${{ steps.eff.outputs.test_duration_minutes }} minute(s)..."
           echo "   Monitor progress at: http://$MASTER_IP:8089"
 
           # Sleep for the test duration
@@ -469,7 +497,7 @@ jobs:
           END_MS="${{ steps.results.outputs.end_time_ms }}"
 
           # Map workflow environment to Grafana template variable value
-          if [ "${{ inputs.environment }}" == "staging" ]; then
+          if [ "${{ steps.eff.outputs.environment }}" == "staging" ]; then
             GRAFANA_ENV="sawyer-staging"
           else
             GRAFANA_ENV="sawyer-prod"
@@ -520,7 +548,7 @@ jobs:
           sleep 180
           echo "✓ Done waiting"
 
-          if [ "${{ inputs.environment }}" == "staging" ]; then
+          if [ "${{ steps.eff.outputs.environment }}" == "staging" ]; then
             GRAFANA_ENV="staging"
           else
             GRAFANA_ENV="production"
@@ -553,7 +581,7 @@ jobs:
         run: |
           # Create folder structure: results/YYYY-MM-DD/ENV-SCENARIO-runNNN/
           TIMESTAMP=$(date -u +"%Y-%m-%d")
-          RUN_ID="${{ inputs.environment }}-${{ inputs.scenario }}-run${{ github.run_number }}"
+          RUN_ID="${{ steps.eff.outputs.environment }}-${{ steps.eff.outputs.scenario }}-run${{ github.run_number }}"
           S3_PATH="results/${TIMESTAMP}/${RUN_ID}"
 
           echo "📤 Uploading results to S3..."
@@ -564,16 +592,16 @@ jobs:
           {
             "test_run_id": "${RUN_ID}",
             "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
-            "environment": "${{ inputs.environment }}",
-            "scenario": "${{ inputs.scenario }}",
+            "environment": "${{ steps.eff.outputs.environment }}",
+            "scenario": "${{ steps.eff.outputs.scenario }}",
             "configuration": {
-              "workers": ${{ inputs.workers }},
-              "instance_type": "${{ inputs.instance_type }}",
+              "workers": ${{ steps.eff.outputs.workers }},
+              "instance_type": "${{ steps.eff.outputs.instance_type }}",
               "users": "${{ steps.test_params.outputs.users }}",
               "spawn_rate": "${{ steps.test_params.outputs.spawn_rate }}",
-              "duration_minutes": ${{ inputs.test_duration_minutes }},
+              "duration_minutes": ${{ steps.eff.outputs.test_duration_minutes }},
               "host": "${{ steps.test_params.outputs.host }}",
-              "actually_placed_orders": ${{ inputs.actually_place_orders }}
+              "actually_placed_orders": ${{ steps.eff.outputs.actually_place_orders }}
             },
             "infrastructure": {
               "dynos": "${{ steps.test_params.outputs.min_dynos }}-${{ steps.test_params.outputs.max_dynos }}",
@@ -607,7 +635,7 @@ jobs:
         if: steps.results.outputs.results_downloaded == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: load-test-results-${{ inputs.environment }}-${{ github.run_number }}
+          name: load-test-results-${{ steps.eff.outputs.environment }}-${{ github.run_number }}
           path: |
             results.csv
             results_stats.csv
@@ -698,10 +726,10 @@ jobs:
           S3_PATH="${{ steps.upload_s3.outputs.s3_path }}"
           BUCKET="sawyer-load-test-results"
           BASE_URL="https://${BUCKET}.s3.amazonaws.com/${S3_PATH}"
-          RUN_ID="${{ inputs.environment }}-${{ inputs.scenario }}-run${{ github.run_number }}"
+          RUN_ID="${{ steps.eff.outputs.environment }}-${{ steps.eff.outputs.scenario }}-run${{ github.run_number }}"
           RUN_DATE=$(date -u +"%Y-%m-%d")
           PADDED_RUN=$(printf "%05d" "${{ github.run_number }}")
-          REPORT_NAME="${RUN_DATE}-${{ inputs.environment }}-${{ inputs.scenario }}-run${PADDED_RUN}"
+          REPORT_NAME="${RUN_DATE}-${{ steps.eff.outputs.environment }}-${{ steps.eff.outputs.scenario }}-run${PADDED_RUN}"
           REPORT_KEY="reports/${REPORT_NAME}.md"
           WORKFLOW_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
