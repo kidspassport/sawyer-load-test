@@ -682,11 +682,37 @@ jobs:
           echo "<details><summary>🤖 AI Analysis (gpt-4o-mini)</summary>" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          python3 scripts/analyze_results.py --token "$GITHUB_TOKEN" >> $GITHUB_STEP_SUMMARY \
+          python3 scripts/analyze_results.py --token "$GITHUB_TOKEN" --output ai-analysis.md >> $GITHUB_STEP_SUMMARY \
             || echo "⚠️ AI analysis unavailable" >> $GITHUB_STEP_SUMMARY
 
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "</details>" >> $GITHUB_STEP_SUMMARY
+
+      - name: Generate and upload report
+        if: steps.results.outputs.results_downloaded == 'true'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          S3_PATH="${{ steps.upload_s3.outputs.s3_path }}"
+          BUCKET="sawyer-load-test-results"
+          BASE_URL="https://${BUCKET}.s3.amazonaws.com/${S3_PATH}"
+          RUN_ID="${{ inputs.environment }}-${{ inputs.scenario }}-run${{ github.run_number }}"
+          REPORT_KEY="reports/${RUN_ID}.md"
+          WORKFLOW_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          python3 scripts/generate_report.py \
+            --run-id "$RUN_ID" \
+            --base-url "$BASE_URL" \
+            --workflow-url "$WORKFLOW_URL" \
+            --output load-test-report.md
+
+          aws s3 cp load-test-report.md "s3://${BUCKET}/${REPORT_KEY}" \
+            --content-type "text/markdown"
+          echo "✓ Report uploaded to s3://${BUCKET}/${REPORT_KEY}"
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📄 **Markdown Report:** [Download from S3](https://${BUCKET}.s3.amazonaws.com/${REPORT_KEY})" >> $GITHUB_STEP_SUMMARY
 
       - name: Scale down infrastructure via API
         if: always()  # Run cleanup even if tests fail

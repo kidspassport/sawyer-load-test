@@ -188,6 +188,11 @@ def main():
         default="history.json",
         help="Path to run history JSON (default: history.json)",
     )
+    parser.add_argument(
+        "--output",
+        default=None,
+        help="Also write AI analysis to this file (in addition to stdout)",
+    )
     args = parser.parse_args()
 
     metadata = load_json("metadata.json")
@@ -237,6 +242,9 @@ def main():
 
     analysis = data["choices"][0]["message"]["content"]
     print(analysis)
+    if args.output:
+        with open(args.output, "w") as f:
+            f.write(analysis)
 
 
 if __name__ == "__main__":
