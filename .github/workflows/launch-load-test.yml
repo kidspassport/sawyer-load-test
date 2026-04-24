@@ -699,7 +699,10 @@ jobs:
           BUCKET="sawyer-load-test-results"
           BASE_URL="https://${BUCKET}.s3.amazonaws.com/${S3_PATH}"
           RUN_ID="${{ inputs.environment }}-${{ inputs.scenario }}-run${{ github.run_number }}"
-          REPORT_KEY="reports/${RUN_ID}.md"
+          RUN_DATE=$(date -u +"%Y-%m-%d")
+          PADDED_RUN=$(printf "%05d" "${{ github.run_number }}")
+          REPORT_NAME="${RUN_DATE}-${{ inputs.environment }}-${{ inputs.scenario }}-run${PADDED_RUN}"
+          REPORT_KEY="reports/${REPORT_NAME}.md"
           WORKFLOW_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
           python3 scripts/generate_report.py \
