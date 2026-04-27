@@ -745,6 +745,49 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "📄 **Markdown Report:** [Download from S3](https://${BUCKET}.s3.amazonaws.com/${REPORT_KEY})" >> $GITHUB_STEP_SUMMARY
 
+      - name: Post Slack notification
+        if: always()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          STATUS="${{ job.status }}"
+          ENV="${{ steps.eff.outputs.environment }}"
+          SCENARIO="${{ steps.eff.outputs.scenario }}"
+          DURATION="${{ steps.eff.outputs.test_duration_minutes }}"
+          USERS="${{ steps.test_params.outputs.users }}"
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          BUCKET="sawyer-load-test-results"
+          RUN_DATE=$(date -u +"%Y-%m-%d")
+          PADDED_RUN=$(printf "%05d" "${{ github.run_number }}")
+          REPORT_URL="https://${BUCKET}.s3.amazonaws.com/reports/${RUN_DATE}-${ENV}-${SCENARIO}-run${PADDED_RUN}.md"
+
+          if [ "$STATUS" == "success" ]; then
+            ICON=":white_check_mark:"
+            COLOR="good"
+          else
+            ICON=":x:"
+            COLOR="danger"
+          fi
+
+          curl -s -X POST "$SLACK_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"attachments\": [{
+                \"color\": \"${COLOR}\",
+                \"title\": \"${ICON} Load Test ${STATUS}: ${SCENARIO} / ${ENV}\",
+                \"fields\": [
+                  {\"title\": \"Environment\", \"value\": \"${ENV}\",      \"short\": true},
+                  {\"title\": \"Scenario\",    \"value\": \"${SCENARIO}\", \"short\": true},
+                  {\"title\": \"Users\",       \"value\": \"${USERS}\",    \"short\": true},
+                  {\"title\": \"Duration\",    \"value\": \"${DURATION} min\", \"short\": true}
+                ],
+                \"actions\": [
+                  {\"type\": \"button\", \"text\": \"View Run\",    \"url\": \"${RUN_URL}\"},
+                  {\"type\": \"button\", \"text\": \"View Report\", \"url\": \"${REPORT_URL}\"}
+                ]
+              }]
+            }"
+
       - name: Scale down infrastructure via API
         if: always()  # Run cleanup even if tests fail
         run: |
