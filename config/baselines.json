@@ -1,0 +1,21 @@
+{
+  "_comment": "Latency values are in milliseconds (from Grafana Nginx metrics). fail_rate_pct is a percentage (e.g. 1 = 1%). Update these after establishing stable baselines for each scenario.",
+  "staging": {
+    "place_order": {
+      "users": 100,
+      "p50_ms": 500,
+      "p95_ms": 1000,
+      "p99_ms": 2000,
+      "fail_rate_pct": 1.0
+    }
+  },
+  "production": {
+    "place_order": {
+      "users": 100,
+      "p50_ms": 500,
+      "p95_ms": 1000,
+      "p99_ms": 2000,
+      "fail_rate_pct": 1.0
+    }
+  }
+}

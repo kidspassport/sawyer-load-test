@@ -1,6 +1,10 @@
 name: Launch Load Test Swarm
 
 on:
+  schedule:
+    # Mondays and Wednesdays at 11 PM Eastern (03:00 UTC during EDT, 04:00 UTC during EST)
+    - cron: '0 3 * * 1,3'
+    - cron: '0 4 * * 1,3'
   workflow_dispatch:
     inputs:
       workers:
@@ -37,7 +41,7 @@ on:
       test_duration_minutes:
         description: 'Test duration (minutes)'
         required: true
-        default: '5'
+        default: '15'
         type: number
 
       # Optional Overrides (leave empty to use environment defaults)
@@ -96,6 +100,30 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Resolve effective inputs
+        id: eff
+        run: |
+          # For scheduled runs, use fixed defaults. For manual runs, use dispatch inputs.
+          if [ "${{ github.event_name }}" == "schedule" ]; then
+            echo "environment=staging"      >> $GITHUB_OUTPUT
+            echo "scenario=place_order"     >> $GITHUB_OUTPUT
+            echo "workers=3"               >> $GITHUB_OUTPUT
+            echo "instance_type=t3.medium" >> $GITHUB_OUTPUT
+            echo "max_duration_hours=2"    >> $GITHUB_OUTPUT
+            echo "test_duration_minutes=15" >> $GITHUB_OUTPUT
+            echo "actually_place_orders=true" >> $GITHUB_OUTPUT
+            echo "✓ Scheduled run — using defaults (staging / place_order / 60 min / actually_place_orders=true)"
+          else
+            echo "environment=${{ inputs.environment }}"               >> $GITHUB_OUTPUT
+            echo "scenario=${{ inputs.scenario }}"                     >> $GITHUB_OUTPUT
+            echo "workers=${{ inputs.workers }}"                       >> $GITHUB_OUTPUT
+            echo "instance_type=${{ inputs.instance_type }}"           >> $GITHUB_OUTPUT
+            echo "max_duration_hours=${{ inputs.max_duration_hours }}" >> $GITHUB_OUTPUT
+            echo "test_duration_minutes=${{ inputs.test_duration_minutes }}" >> $GITHUB_OUTPUT
+            echo "actually_place_orders=${{ inputs.actually_place_orders }}" >> $GITHUB_OUTPUT
+            echo "✓ Manual run — using dispatch inputs"
+          fi
+
       - name: Check for existing swarms
         id: check_existing
         env:
@@ -127,7 +155,7 @@ jobs:
         id: test_params
         run: |
           # Set defaults based on environment
-          if [ "${{ inputs.environment }}" == "staging" ]; then
+          if [ "${{ steps.eff.outputs.environment }}" == "staging" ]; then
             DEFAULT_USERS=100
             DEFAULT_SPAWN_RATE=1
             DEFAULT_HOST="https://staging.hisawyer.com"
@@ -135,8 +163,8 @@ jobs:
             DEFAULT_SLUG="pretend-school"
             DEFAULT_MIN_DYNOS=5
             DEFAULT_MAX_DYNOS=15
-            DEFAULT_MIN_ACU=4
-            DEFAULT_MAX_ACU=32
+            DEFAULT_MIN_ACU=12
+            DEFAULT_MAX_ACU=50
             HEROKU_APP="sawyer-staging"
           else
             DEFAULT_USERS=500
@@ -146,8 +174,8 @@ jobs:
             DEFAULT_SLUG="sawyer-engineering-test-provider"
             DEFAULT_MIN_DYNOS=10
             DEFAULT_MAX_DYNOS=30
-            DEFAULT_MIN_ACU=8
-            DEFAULT_MAX_ACU=64
+            DEFAULT_MIN_ACU=25
+            DEFAULT_MAX_ACU=100
             HEROKU_APP="sawyer-prod"
           fi
 
@@ -185,7 +213,7 @@ jobs:
           echo "host=$HOST" >> $GITHUB_OUTPUT
           echo "booking_fee_id=$BOOKING_FEE_ID" >> $GITHUB_OUTPUT
           echo "slug=$SLUG" >> $GITHUB_OUTPUT
-          echo "scenario=${{ inputs.scenario }}" >> $GITHUB_OUTPUT
+          echo "scenario=${{ steps.eff.outputs.scenario }}" >> $GITHUB_OUTPUT
           echo "min_dynos=$MIN_DYNOS" >> $GITHUB_OUTPUT
           echo "max_dynos=$MAX_DYNOS" >> $GITHUB_OUTPUT
           echo "min_acu=$MIN_ACU" >> $GITHUB_OUTPUT
@@ -196,7 +224,7 @@ jobs:
           echo "  Users: $USERS"
           echo "  Spawn Rate: $SPAWN_RATE"
           echo "  Host: $HOST"
-          echo "  Scenario: ${{ inputs.scenario }}"
+          echo "  Scenario: ${{ steps.eff.outputs.scenario }}"
           echo "  Booking Fee ID: $BOOKING_FEE_ID"
           echo "  Slug: $SLUG"
           echo "  Heroku App: $HEROKU_APP"
@@ -204,21 +232,21 @@ jobs:
           echo "  Aurora ACUs: $MIN_ACU-$MAX_ACU"
 
           # Update instance type in launch script
-          sed -i "s/INSTANCE_TYPE=\"t3.medium\"/INSTANCE_TYPE=\"${{ inputs.instance_type }}\"/" launch-swarm.sh
+          sed -i "s/INSTANCE_TYPE=\"t3.medium\"/INSTANCE_TYPE=\"${{ steps.eff.outputs.instance_type }}\"/" launch-swarm.sh
 
           # Update test parameters in setup scripts
-          sed -i "s|--scenario=place_order|--scenario=${{ inputs.scenario }}|g" swarm_scripts/master_setup.sh
+          sed -i "s|--scenario=place_order|--scenario=${{ steps.eff.outputs.scenario }}|g" swarm_scripts/master_setup.sh
           sed -i "s|--slug=pretend-school|--slug=$SLUG|g" swarm_scripts/master_setup.sh
           sed -i "s|--booking_fee_id=306|--booking_fee_id=$BOOKING_FEE_ID|g" swarm_scripts/master_setup.sh
           sed -i "s|--host=https://staging.hisawyer.com|--host=$HOST|g" swarm_scripts/master_setup.sh
 
-          sed -i "s|--scenario=place_order|--scenario=${{ inputs.scenario }}|g" swarm_scripts/worker_setup.sh
+          sed -i "s|--scenario=place_order|--scenario=${{ steps.eff.outputs.scenario }}|g" swarm_scripts/worker_setup.sh
           sed -i "s|--slug=pretend-school|--slug=$SLUG|g" swarm_scripts/worker_setup.sh
           sed -i "s|--booking_fee_id=306|--booking_fee_id=$BOOKING_FEE_ID|g" swarm_scripts/worker_setup.sh
           sed -i "s|--host=https://staging.hisawyer.com|--host=$HOST|g" swarm_scripts/worker_setup.sh
 
           # Add --actually-place-orders flag if enabled
-          if [ "${{ inputs.actually_place_orders }}" == "true" ]; then
+          if [ "${{ steps.eff.outputs.actually_place_orders }}" == "true" ]; then
             echo "⚠️  WARNING: Orders will actually be placed!"
             sed -i "s|--host=|--actually-place-orders --host=|g" swarm_scripts/master_setup.sh
             sed -i "s|--host=|--actually-place-orders --host=|g" swarm_scripts/worker_setup.sh
@@ -256,8 +284,8 @@ jobs:
           fi
 
           # Add 30 minutes of padding to allow for test startup/shutdown
-          SCALE_DURATION=$((${{ inputs.test_duration_minutes }} + 30))
-          echo "Test duration: ${{ inputs.test_duration_minutes }} minutes (scaling for ${SCALE_DURATION} minutes with 30min padding)"
+          SCALE_DURATION=$((${{ steps.eff.outputs.test_duration_minutes }} + 30))
+          echo "Test duration: ${{ steps.eff.outputs.test_duration_minutes }} minutes (scaling for ${SCALE_DURATION} minutes with 30min padding)"
 
           response=$(curl -s -w "\n%{http_code}" -X POST \
             -H "Authorization: Bearer ${{ secrets.LOAD_TEST_API_TOKEN }}" \
@@ -312,10 +340,10 @@ jobs:
           echo "## 🚀 Load Test Swarm Launched!" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Configuration:**" >> $GITHUB_STEP_SUMMARY
-          echo "- Workers: ${{ inputs.workers }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Instance Type: ${{ inputs.instance_type }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Environment: ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Max Duration: ${{ inputs.max_duration_hours }} hours" >> $GITHUB_STEP_SUMMARY
+          echo "- Workers: ${{ steps.eff.outputs.workers }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Instance Type: ${{ steps.eff.outputs.instance_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Environment: ${{ steps.eff.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Max Duration: ${{ steps.eff.outputs.max_duration_hours }} hours" >> $GITHUB_STEP_SUMMARY
           echo "- Launch Time: ${{ steps.launch.outputs.launch_time }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Access:**" >> $GITHUB_STEP_SUMMARY
@@ -327,7 +355,7 @@ jobs:
           echo "- Check worker count in top-right of Web UI" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Auto-Termination:**" >> $GITHUB_STEP_SUMMARY
-          echo "- Swarm will auto-terminate in ${{ inputs.max_duration_hours }} hour(s)" >> $GITHUB_STEP_SUMMARY
+          echo "- Swarm will auto-terminate in ${{ steps.eff.outputs.max_duration_hours }} hour(s)" >> $GITHUB_STEP_SUMMARY
           echo "- Or manually terminate with: \`./terminate-swarm.sh\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "---" >> $GITHUB_STEP_SUMMARY
@@ -393,7 +421,7 @@ jobs:
           echo "🚀 Starting load test..."
           echo "  Users: $USERS"
           echo "  Spawn Rate: $SPAWN_RATE"
-          echo "  Duration: ${{ inputs.test_duration_minutes }} minutes"
+          echo "  Duration: ${{ steps.eff.outputs.test_duration_minutes }} minutes"
 
           # Start the swarm via API
           HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
@@ -404,6 +432,7 @@ jobs:
           if [ "$HTTP_CODE" == "200" ]; then
             echo "✓ Load test started successfully"
             echo "start_time=$(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_OUTPUT
+            echo "start_time_ms=$(date -u +%s)000" >> $GITHUB_OUTPUT
           else
             echo "❌ Failed to start load test (HTTP $HTTP_CODE)"
             exit 1
@@ -419,16 +448,16 @@ jobs:
           echo "- Users: $USERS" >> $GITHUB_STEP_SUMMARY
           echo "- Spawn Rate: $SPAWN_RATE users/sec" >> $GITHUB_STEP_SUMMARY
           echo "- Host: ${{ steps.test_params.outputs.host }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Duration: ${{ inputs.test_duration_minutes }} minutes" >> $GITHUB_STEP_SUMMARY
-          echo "- Actually Place Orders: ${{ inputs.actually_place_orders }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Duration: ${{ steps.eff.outputs.test_duration_minutes }} minutes" >> $GITHUB_STEP_SUMMARY
+          echo "- Actually Place Orders: ${{ steps.eff.outputs.actually_place_orders }}" >> $GITHUB_STEP_SUMMARY
           echo "- Started: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
 
       - name: Monitor test execution
         run: |
           MASTER_IP="${{ steps.launch.outputs.master_ip }}"
-          DURATION_SECONDS=$((60 * ${{ inputs.test_duration_minutes }}))
+          DURATION_SECONDS=$((60 * ${{ steps.eff.outputs.test_duration_minutes }}))
 
-          echo "⏱️  Test will run for ${{ inputs.test_duration_minutes }} minute(s)..."
+          echo "⏱️  Test will run for ${{ steps.eff.outputs.test_duration_minutes }} minute(s)..."
           echo "   Monitor progress at: http://$MASTER_IP:8089"
 
           # Sleep for the test duration
@@ -455,12 +484,158 @@ jobs:
 
           echo "✓ Results downloaded"
           echo "results_downloaded=true" >> $GITHUB_OUTPUT
+          echo "end_time_ms=$(date -u +%s)000" >> $GITHUB_OUTPUT
+
+      - name: Fetch Grafana data
+        if: steps.results.outputs.results_downloaded == 'true'
+        env:
+          GRAFANA_API_TOKEN: ${{ secrets.GRAFANA_API_TOKEN }}
+        run: |
+          GRAFANA_URL="https://daysmartsawyer.grafana.net"
+          DASHBOARD_UID="mi9sfkq"
+          START_MS="${{ steps.start_test.outputs.start_time_ms }}"
+          END_MS="${{ steps.results.outputs.end_time_ms }}"
+
+          # Map workflow environment to Grafana template variable value
+          if [ "${{ steps.eff.outputs.environment }}" == "staging" ]; then
+            GRAFANA_ENV="sawyer-staging"
+          else
+            GRAFANA_ENV="sawyer-prod"
+          fi
+
+          echo "📊 Fetching Grafana data for time window: ${START_MS} to ${END_MS} (env: ${GRAFANA_ENV})"
+
+          BASE_PARAMS="orgId=1&from=${START_MS}&to=${END_MS}&tz=UTC&var-environment=${GRAFANA_ENV}"
+
+          fetch_panel() {
+            local panel_id="$1" label="$2" file="$3"
+            echo "📸 Fetching ${label} (panel ${panel_id})..."
+            local code
+            code=$(curl -s -o "${file}" -w "%{http_code}" \
+              -H "Authorization: Bearer $GRAFANA_API_TOKEN" \
+              "${GRAFANA_URL}/render/d-solo/${DASHBOARD_UID}/monitoring-dashboard?${BASE_PARAMS}&panelId=${panel_id}&width=1000&height=350")
+            if [ "$code" == "200" ]; then
+              echo "✓ ${label} downloaded ($(du -h ${file} | cut -f1))"
+            else
+              echo "⚠️  ${label} failed (HTTP $code)"
+              rm -f "${file}"
+            fi
+          }
+
+          fetch_panel 35 "Throughput"            grafana-panel-throughput.png
+          fetch_panel 38 "Latency (time series)" grafana-panel-latency-ts.png
+          fetch_panel 39 "Latency (p50/p95/p99)" grafana-panel-latency-pct.png
+          fetch_panel 16 "CPU usage"             grafana-panel-cpu.png
+
+          echo "📋 Fetching dashboard definition..."
+          DASHBOARD_CODE=$(curl -s -o grafana-dashboard.json -w "%{http_code}" \
+            -H "Authorization: Bearer $GRAFANA_API_TOKEN" \
+            "${GRAFANA_URL}/api/dashboards/uid/${DASHBOARD_UID}")
+
+          if [ "$DASHBOARD_CODE" == "200" ]; then
+            echo "✓ Dashboard definition downloaded"
+          else
+            echo "⚠️  Dashboard definition failed (HTTP $DASHBOARD_CODE)"
+            rm -f grafana-dashboard.json
+          fi
+
+      - name: Fetch Grafana latency metrics
+        if: steps.results.outputs.results_downloaded == 'true'
+        env:
+          GRAFANA_API_TOKEN: ${{ secrets.GRAFANA_API_TOKEN }}
+        run: |
+          echo "⏳ Waiting 3 minutes for metrics to propagate to Grafana Cloud..."
+          sleep 180
+          echo "✓ Done waiting"
+
+          if [ "${{ steps.eff.outputs.environment }}" == "staging" ]; then
+            GRAFANA_ENV="staging"
+          else
+            GRAFANA_ENV="production"
+          fi
+
+          FROM_MS="${{ steps.start_test.outputs.start_time_ms }}"
+          TO_MS="${{ steps.results.outputs.end_time_ms }}"
+
+          if [ -z "$FROM_MS" ] || [ -z "$TO_MS" ]; then
+            echo "⚠️  Missing timestamps (from=$FROM_MS to=$TO_MS) — skipping Grafana metrics"
+          else
+            echo "Fetching Nginx latency for window: ${FROM_MS} → ${TO_MS}  env=${GRAFANA_ENV}"
+            python3 scripts/fetch_grafana_metrics.py \
+              --token "$GRAFANA_API_TOKEN" \
+              --environment "$GRAFANA_ENV" \
+              --from-ms "$FROM_MS" \
+              --to-ms "$TO_MS" \
+              --output grafana-metrics.json \
+            && cat grafana-metrics.json \
+            || echo "⚠️  Grafana metrics fetch failed (see error above) — latency will fall back to Locust values"
+          fi
+
+      - name: Upload results to S3
+        id: upload_s3
+        if: steps.results.outputs.results_downloaded == 'true'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          # Create folder structure: results/YYYY-MM-DD/ENV-SCENARIO-runNNN/
+          TIMESTAMP=$(date -u +"%Y-%m-%d")
+          RUN_ID="${{ steps.eff.outputs.environment }}-${{ steps.eff.outputs.scenario }}-run${{ github.run_number }}"
+          S3_PATH="results/${TIMESTAMP}/${RUN_ID}"
+
+          echo "📤 Uploading results to S3..."
+          echo "   Path: s3://sawyer-load-test-results/${S3_PATH}/"
+
+          # Create metadata file with test configuration
+          cat > metadata.json <<EOF
+          {
+            "test_run_id": "${RUN_ID}",
+            "timestamp": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "environment": "${{ steps.eff.outputs.environment }}",
+            "scenario": "${{ steps.eff.outputs.scenario }}",
+            "configuration": {
+              "workers": ${{ steps.eff.outputs.workers }},
+              "instance_type": "${{ steps.eff.outputs.instance_type }}",
+              "users": "${{ steps.test_params.outputs.users }}",
+              "spawn_rate": "${{ steps.test_params.outputs.spawn_rate }}",
+              "duration_minutes": ${{ steps.eff.outputs.test_duration_minutes }},
+              "host": "${{ steps.test_params.outputs.host }}",
+              "actually_placed_orders": ${{ steps.eff.outputs.actually_place_orders }}
+            },
+            "infrastructure": {
+              "dynos": "${{ steps.test_params.outputs.min_dynos }}-${{ steps.test_params.outputs.max_dynos }}",
+              "aurora_acu": "${{ steps.test_params.outputs.min_acu }}-${{ steps.test_params.outputs.max_acu }}"
+            },
+            "github": {
+              "workflow_run_id": "${{ github.run_id }}",
+              "workflow_url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+              "commit_sha": "${{ github.sha }}"
+            }
+          }
+          EOF
+
+          # Upload all files to S3
+          aws s3 cp results.csv "s3://sawyer-load-test-results/${S3_PATH}/results.csv"
+          aws s3 cp results_stats.csv "s3://sawyer-load-test-results/${S3_PATH}/results_stats.csv"
+          aws s3 cp results_failures.csv "s3://sawyer-load-test-results/${S3_PATH}/results_failures.csv"
+          aws s3 cp metadata.json "s3://sawyer-load-test-results/${S3_PATH}/metadata.json"
+
+          # Upload Grafana data if available
+          for panel_file in grafana-panel-throughput.png grafana-panel-latency-ts.png grafana-panel-latency-pct.png grafana-panel-cpu.png; do
+            [ -f "$panel_file" ] && aws s3 cp "$panel_file" "s3://sawyer-load-test-results/${S3_PATH}/${panel_file}" && echo "✓ ${panel_file} uploaded"
+          done
+          [ -f grafana-dashboard.json ] && aws s3 cp grafana-dashboard.json "s3://sawyer-load-test-results/${S3_PATH}/grafana-dashboard.json" && echo "✓ Grafana dashboard definition uploaded"
+          [ -f grafana-metrics.json ] && aws s3 cp grafana-metrics.json "s3://sawyer-load-test-results/${S3_PATH}/grafana-metrics.json" && echo "✓ Grafana latency metrics uploaded"
+
+          echo "✓ Results uploaded to S3"
+          echo "s3_path=${S3_PATH}" >> $GITHUB_OUTPUT
 
       - name: Upload test results
         if: steps.results.outputs.results_downloaded == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: load-test-results-${{ inputs.environment }}-${{ github.run_number }}
+          name: load-test-results-${{ steps.eff.outputs.environment }}-${{ github.run_number }}
           path: |
             results.csv
             results_stats.csv
@@ -476,16 +651,142 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Completed at: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "📊 **Results available in workflow artifacts**" >> $GITHUB_STEP_SUMMARY
+          echo "📊 **Results Storage**" >> $GITHUB_STEP_SUMMARY
+          echo "- GitHub Artifacts: Available in workflow artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- S3 Bucket: \`s3://sawyer-load-test-results/${{ steps.upload_s3.outputs.s3_path }}/\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Quick stats from results:" >> $GITHUB_STEP_SUMMARY
 
-          # Show summary from CSV
           if [ -f results.csv ]; then
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-            head -20 results.csv >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            GRAFANA_ARGS=""
+            [ -f grafana-metrics.json ] && GRAFANA_ARGS="--grafana-metrics grafana-metrics.json"
+            python3 scripts/parse_locust_results.py $GRAFANA_ARGS >> $GITHUB_STEP_SUMMARY
           fi
+
+          S3_PATH="${{ steps.upload_s3.outputs.s3_path }}"
+          BUCKET="sawyer-load-test-results"
+
+          declare -A PANEL_LABELS=(
+            [grafana-panel-throughput.png]="📈 Throughput"
+            [grafana-panel-latency-ts.png]="⏱ Latency (time series)"
+            [grafana-panel-latency-pct.png]="📊 Latency Percentiles (p50 / p95 / p99)"
+            [grafana-panel-cpu.png]="🖥 CPU Usage"
+          )
+
+          PANELS_ADDED=0
+          for panel_file in grafana-panel-throughput.png grafana-panel-latency-ts.png grafana-panel-latency-pct.png grafana-panel-cpu.png; do
+            if [ -f "$panel_file" ]; then
+              if [ $PANELS_ADDED -eq 0 ]; then
+                echo "" >> $GITHUB_STEP_SUMMARY
+                echo "### 📷 Grafana Panels" >> $GITHUB_STEP_SUMMARY
+                echo "" >> $GITHUB_STEP_SUMMARY
+              fi
+              LABEL="${PANEL_LABELS[$panel_file]}"
+              URL="https://${BUCKET}.s3.amazonaws.com/${S3_PATH}/${panel_file}"
+              echo "**${LABEL}**" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "![${LABEL}](${URL})" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              PANELS_ADDED=$((PANELS_ADDED + 1))
+            fi
+          done
+
+      - name: Update run history
+        if: steps.results.outputs.results_downloaded == 'true'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          python3 scripts/update_history.py --bucket sawyer-load-test-results \
+            || echo "⚠️  History update failed — AI analysis will run without historical context"
+
+      - name: Analyze results with AI
+        if: steps.results.outputs.results_downloaded == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "<details><summary>🤖 AI Analysis (gpt-4o-mini)</summary>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          python3 scripts/analyze_results.py --token "$GITHUB_TOKEN" --output ai-analysis.md >> $GITHUB_STEP_SUMMARY \
+            || echo "⚠️ AI analysis unavailable" >> $GITHUB_STEP_SUMMARY
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "</details>" >> $GITHUB_STEP_SUMMARY
+
+      - name: Generate and upload report
+        if: steps.results.outputs.results_downloaded == 'true'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          S3_PATH="${{ steps.upload_s3.outputs.s3_path }}"
+          BUCKET="sawyer-load-test-results"
+          BASE_URL="https://${BUCKET}.s3.amazonaws.com/${S3_PATH}"
+          RUN_ID="${{ steps.eff.outputs.environment }}-${{ steps.eff.outputs.scenario }}-run${{ github.run_number }}"
+          RUN_DATE=$(date -u +"%Y-%m-%d")
+          PADDED_RUN=$(printf "%05d" "${{ github.run_number }}")
+          REPORT_NAME="${RUN_DATE}-${{ steps.eff.outputs.environment }}-${{ steps.eff.outputs.scenario }}-run${PADDED_RUN}"
+          REPORT_KEY="reports/${REPORT_NAME}.md"
+          WORKFLOW_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          python3 scripts/generate_report.py \
+            --run-id "$RUN_ID" \
+            --base-url "$BASE_URL" \
+            --workflow-url "$WORKFLOW_URL" \
+            --output load-test-report.md
+
+          aws s3 cp load-test-report.md "s3://${BUCKET}/${REPORT_KEY}" \
+            --content-type "text/markdown"
+          echo "✓ Report uploaded to s3://${BUCKET}/${REPORT_KEY}"
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📄 **Markdown Report:** [Download from S3](https://${BUCKET}.s3.amazonaws.com/${REPORT_KEY})" >> $GITHUB_STEP_SUMMARY
+
+      - name: Post Slack notification
+        if: always()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          STATUS="${{ job.status }}"
+          ENV="${{ steps.eff.outputs.environment }}"
+          SCENARIO="${{ steps.eff.outputs.scenario }}"
+          DURATION="${{ steps.eff.outputs.test_duration_minutes }}"
+          USERS="${{ steps.test_params.outputs.users }}"
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          BUCKET="sawyer-load-test-results"
+          RUN_DATE=$(date -u +"%Y-%m-%d")
+          PADDED_RUN=$(printf "%05d" "${{ github.run_number }}")
+          REPORT_URL="https://${BUCKET}.s3.amazonaws.com/reports/${RUN_DATE}-${ENV}-${SCENARIO}-run${PADDED_RUN}.md"
+
+          if [ "$STATUS" == "success" ]; then
+            ICON=":white_check_mark:"
+            COLOR="good"
+          else
+            ICON=":x:"
+            COLOR="danger"
+          fi
+
+          curl -s -X POST "$SLACK_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"attachments\": [{
+                \"color\": \"${COLOR}\",
+                \"title\": \"${ICON} Load Test ${STATUS}: ${SCENARIO} / ${ENV}\",
+                \"fields\": [
+                  {\"title\": \"Environment\", \"value\": \"${ENV}\",      \"short\": true},
+                  {\"title\": \"Scenario\",    \"value\": \"${SCENARIO}\", \"short\": true},
+                  {\"title\": \"Users\",       \"value\": \"${USERS}\",    \"short\": true},
+                  {\"title\": \"Duration\",    \"value\": \"${DURATION} min\", \"short\": true}
+                ],
+                \"actions\": [
+                  {\"type\": \"button\", \"text\": \"View Run\",    \"url\": \"${RUN_URL}\"},
+                  {\"type\": \"button\", \"text\": \"View Report\", \"url\": \"${REPORT_URL}\"}
+                ]
+              }]
+            }"
 
       - name: Scale down infrastructure via API
         if: always()  # Run cleanup even if tests fail
