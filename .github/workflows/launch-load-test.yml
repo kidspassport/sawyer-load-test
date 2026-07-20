@@ -2,8 +2,11 @@ name: Launch Load Test Swarm
 
 on:
   schedule:
-    # Mondays at 1:05 UTC
-    - cron: '5 1 * * 1'
+    # Mondays and Wednesdays at 11 PM Eastern (03:00 UTC Tue/Thu = Mon/Wed EDT)
+    # Note: runs at midnight Eastern during EST (Nov–Mar) due to UTC offset
+    # - cron: '0 3 * * 2,4'
+    # Mondays at 1:40 UTC
+    - cron: '40 1 * * 1'
   workflow_dispatch:
     inputs:
       workers:
