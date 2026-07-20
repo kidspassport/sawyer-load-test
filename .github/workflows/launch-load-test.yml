@@ -286,29 +286,52 @@ jobs:
           SCALE_DURATION=$((${{ steps.eff.outputs.test_duration_minutes }} + 30))
           echo "Test duration: ${{ steps.eff.outputs.test_duration_minutes }} minutes (scaling for ${SCALE_DURATION} minutes with 30min padding)"
 
-          response=$(curl -s -w "\n%{http_code}" -X POST \
-            -H "Authorization: Bearer ${{ secrets.LOAD_TEST_API_TOKEN }}" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "min_dynos": ${{ steps.test_params.outputs.min_dynos }},
-              "max_dynos": ${{ steps.test_params.outputs.max_dynos }},
-              "min_acu": ${{ steps.test_params.outputs.min_acu }},
-              "max_acu": ${{ steps.test_params.outputs.max_acu }},
-              "duration_minutes": '"${SCALE_DURATION}"'
-            }' \
-            "${HOST_URL}/api/v1/load_tests/scale_up")
+          PAYLOAD='{
+            "min_dynos": ${{ steps.test_params.outputs.min_dynos }},
+            "max_dynos": ${{ steps.test_params.outputs.max_dynos }},
+            "min_acu": ${{ steps.test_params.outputs.min_acu }},
+            "max_acu": ${{ steps.test_params.outputs.max_acu }},
+            "duration_minutes": '"${SCALE_DURATION}"'
+          }'
 
-          http_code=$(echo "$response" | tail -n1)
-          body=$(echo "$response" | sed '$d')
+          MAX_RETRIES=5
+          RETRY_DELAY=60
+          attempt=0
 
-          echo "Response: $body"
+          while [ $attempt -lt $MAX_RETRIES ]; do
+            attempt=$((attempt + 1))
+            echo ""
+            echo "Attempt $attempt/$MAX_RETRIES..."
 
-          if [ "$http_code" != "200" ]; then
-            echo "❌ Failed to scale up infrastructure (HTTP $http_code)"
-            exit 1
-          fi
+            response=$(curl -s -w "\n%{http_code}" -X POST \
+              -H "Authorization: Bearer ${{ secrets.LOAD_TEST_API_TOKEN }}" \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD" \
+              "${HOST_URL}/api/v1/load_tests/scale_up")
 
-          echo "✅ Infrastructure scaled up successfully"
+            http_code=$(echo "$response" | tail -n1)
+            body=$(echo "$response" | sed '$d')
+
+            echo "HTTP $http_code — Response: $body"
+
+            if [ "$http_code" == "200" ]; then
+              echo "✅ Infrastructure scaled up successfully (attempt $attempt)"
+              exit 0
+            fi
+
+            echo "⚠️  Scale up failed (HTTP $http_code)"
+
+            if [ $attempt -lt $MAX_RETRIES ]; then
+              echo "   Retrying in ${RETRY_DELAY}s..."
+              sleep $RETRY_DELAY
+            fi
+          done
+
+          echo "❌ Failed to scale up infrastructure after $MAX_RETRIES attempts (last HTTP $http_code)"
+          echo "   event=${{ github.event_name }} run_id=${{ github.run_id }} run_number=${{ github.run_number }}"
+          echo "   Target: ${HOST_URL}/api/v1/load_tests/scale_up"
+          echo "   Payload: $PAYLOAD"
+          exit 1
 
       - name: Launch EC2 swarm
         id: launch
