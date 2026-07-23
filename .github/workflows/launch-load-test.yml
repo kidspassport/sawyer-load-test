@@ -2,8 +2,8 @@ name: Launch Load Test Swarm
 
 on:
   schedule:
-    # Mondays and Wednesdays at 9 PM EDT / 10 PM EST
-    - cron: '0 1 * * 2,4'
+    # Mondays, Wednesdays and Fridays at 9 PM EDT / 10 PM EST
+    - cron: '0 1 * * 2,4,5'
   workflow_dispatch:
     inputs:
       workers:
