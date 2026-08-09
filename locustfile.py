@@ -1,6 +1,7 @@
 from locust import HttpUser, between, events
 from scenarios.visit_widget import VisitWidgetScenario
 from scenarios.place_order import PlaceOrderScenario
+from scenarios.mobile_checkout import MobileCheckoutScenario
 from utils.auth import login
 import os
 import importlib
@@ -36,6 +37,8 @@ class RailsUser(HttpUser):
             self.tasks = [VisitWidgetScenario]
         elif scenario == "place_order":
             self.tasks = [PlaceOrderScenario]
+        elif scenario == "mobile_checkout":
+            self.tasks = [MobileCheckoutScenario]
         elif scenario == "rush":
             self.tasks = [VisitWidgetScenario, PlaceOrderScenario]
         else:
@@ -46,7 +49,7 @@ class RailsUser(HttpUser):
 @events.init_command_line_parser.add_listener
 def custom_args(parser):
     parser.add_argument("--scenario", choices=["place_order",
-                        "visit_widget", "rush"], default="place_order", help="Scenario")
+                        "visit_widget", "rush", "mobile_checkout"], default="place_order", help="Scenario")
     parser.add_argument("--slug", is_required=True, default="pretend-school")
     parser.add_argument("--booking_fee_id", is_required=True, default="306")
     parser.add_argument("--actually-place-orders", action="store_true",
